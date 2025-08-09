@@ -1,0 +1,13 @@
+requests
+beautifulsoup4
+pandas
+numpy
+scikit-learn
+nltk
+sentence-transformers
+typer[all]
+python-dotenv
+pyyaml
+jsonschema
+spacy
+google-generativeai
