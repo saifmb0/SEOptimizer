@@ -46,6 +46,156 @@ UAE_COMMERCIAL_TRIGGERS = {
 }
 
 
+# =============================================================================
+# SERP Feature CTR Adjustments
+# =============================================================================
+# SERP features that reduce organic CTR for traditional blue links
+# Based on industry research on click distribution with various SERP features
+
+# CTR reduction factors (0.0 = no reduction, 1.0 = complete CTR loss)
+SERP_FEATURE_CTR_IMPACT = {
+    # Knowledge panels/instant answers (major CTR reduction)
+    "knowledge_panel": 0.30,    # Definitional queries satisfied in SERP
+    "featured_snippet": 0.25,   # Answer displayed, fewer clicks needed
+    "instant_answer": 0.35,     # Calculator, weather, time, etc.
+    "local_pack": 0.20,         # Map pack takes clicks for local queries
+    
+    # Rich results (moderate CTR reduction)
+    "shopping_results": 0.15,   # Product carousel above organic
+    "video_carousel": 0.10,     # Video results for how-to queries
+    "image_pack": 0.08,         # Image results for visual queries
+    "people_also_ask": 0.05,    # PAA expands but can drive clicks too
+    
+    # Ads (significant CTR reduction for commercial queries)
+    "top_ads": 0.20,            # Google Ads above organic
+    "bottom_ads": 0.05,         # Ads below organic (minor impact)
+    "shopping_ads": 0.18,       # Product listing ads
+}
+
+# Keyword patterns that likely trigger SERP features
+SERP_FEATURE_TRIGGERS = {
+    # Knowledge panel triggers (definitions, facts)
+    "knowledge_panel": [
+        "what is", "what are", "define", "definition", "meaning",
+        "who is", "who was", "when did", "when was", "where is",
+        "capital of", "population of", "height of", "age of",
+    ],
+    # Featured snippet triggers (instructional/listicle)
+    "featured_snippet": [
+        "how to", "how do", "steps to", "ways to", "tips for",
+        "guide to", "tutorial", "best way", "top 10", "list of",
+        "checklist", "template", "example", "examples of",
+    ],
+    # Instant answer triggers (calculations, conversions)
+    "instant_answer": [
+        "calculator", "convert", "conversion", "time in", "weather in",
+        "exchange rate", "translate", "timer", "countdown",
+        "sunrise", "sunset", "timezone", "distance from",
+    ],
+    # Local pack triggers
+    "local_pack": [
+        "near me", "in dubai", "in abu dhabi", "in sharjah",
+        "nearby", "closest", "local", "around me",
+        "open now", "hours", "directions to", "address",
+    ],
+    # Video carousel triggers
+    "video_carousel": [
+        "how to", "tutorial", "diy", "review", "unboxing",
+        "walkthrough", "demonstration", "explained", "course",
+    ],
+    # Shopping results triggers
+    "shopping_results": [
+        "buy", "price", "cheap", "discount", "deal", "sale",
+        "best price", "where to buy", "online", "order",
+        "for sale", "cost of", "prices for",
+    ],
+}
+
+
+def estimate_serp_features(keyword: str, intent: str = "informational") -> List[str]:
+    """
+    Estimate which SERP features are likely to appear for a keyword.
+    
+    This is a heuristic-based estimation since we don't have live SERP data.
+    Used to adjust CTR expectations for opportunity scoring.
+    
+    Args:
+        keyword: The keyword to analyze
+        intent: Pre-classified intent
+        
+    Returns:
+        List of likely SERP features for this keyword
+    """
+    kw_lower = keyword.lower()
+    features = []
+    
+    # Check each feature's triggers
+    for feature, triggers in SERP_FEATURE_TRIGGERS.items():
+        for trigger in triggers:
+            if trigger in kw_lower:
+                features.append(feature)
+                break
+    
+    # Intent-based feature estimation
+    if intent == "informational":
+        if "featured_snippet" not in features:
+            # Informational queries often get PAA
+            features.append("people_also_ask")
+    
+    if intent in ("transactional", "commercial"):
+        if "top_ads" not in features:
+            features.append("top_ads")  # Commercial queries attract ads
+    
+    if intent == "local":
+        if "local_pack" not in features:
+            features.append("local_pack")
+    
+    return features
+
+
+def ctr_potential(
+    keyword: str,
+    intent: str = "informational",
+    serp_features: Optional[List[str]] = None,
+) -> float:
+    """
+    Calculate CTR potential score accounting for SERP feature competition.
+    
+    A score of 1.0 means maximum organic CTR potential (no SERP features).
+    Lower scores indicate reduced organic CTR due to SERP features.
+    
+    This helps prioritize keywords where organic rankings will actually
+    drive traffic, rather than keywords dominated by SERP features.
+    
+    Args:
+        keyword: The keyword to evaluate
+        intent: Pre-classified intent
+        serp_features: Optional list of known SERP features (auto-estimated if None)
+        
+    Returns:
+        CTR potential score (0.0 - 1.0)
+        - 1.0: Maximum CTR potential (no SERP features)
+        - 0.7-0.9: Good CTR potential (minor SERP features)
+        - 0.5-0.7: Moderate CTR potential (some features)
+        - 0.3-0.5: Reduced CTR potential (many features)
+        - <0.3: Low CTR potential (dominated by features)
+    """
+    if serp_features is None:
+        serp_features = estimate_serp_features(keyword, intent)
+    
+    # Start with 100% CTR potential
+    ctr = 1.0
+    
+    # Reduce for each SERP feature (diminishing returns)
+    for feature in serp_features:
+        impact = SERP_FEATURE_CTR_IMPACT.get(feature, 0.05)
+        # Apply reduction (multiplicative, not additive)
+        ctr *= (1.0 - impact)
+    
+    # Floor at 0.2 (there's always some organic CTR)
+    return float(max(0.2, min(1.0, ctr)))
+
+
 def raw_volume_proxy(
     keyword: str, 
     freq: int, 
@@ -247,9 +397,15 @@ def compute_metrics(
 
     metrics: Dict[str, Dict] = {}
     for k in keywords:
+        intent = intents.get(k, "informational")
+        ctr = ctr_potential(k, intent)
+        serp_features = estimate_serp_features(k, intent)
+        
         metrics[k] = {
             "search_volume": float(max(0.0, min(1.0, v_norm.get(k, 0.5)))),
             "difficulty": float(max(0.0, min(1.0, d_norm.get(k, 0.5)))),
+            "ctr_potential": ctr,
+            "serp_features": serp_features,
             "estimated": not has_real_data,
             "validated": validated.get(k, False),
         }
@@ -262,12 +418,14 @@ def opportunity_scores(
     goals: str,
     geo: str = "global",
     niche: Optional[str] = None,
+    use_ctr_adjustment: bool = True,
 ) -> Dict[str, float]:
     """
     Calculate opportunity scores for keywords.
     
-    Formula: search_volume * (1 - difficulty) * (business_relevance + commercial_boost)
+    Formula: search_volume * ctr_potential * (1 - difficulty) * (business_relevance + commercial_boost)
     
+    CTR potential accounts for SERP features that reduce organic click-through.
     For lead-generation goals, commercial_value provides additional boost
     to high-value transactional keywords.
     
@@ -277,6 +435,7 @@ def opportunity_scores(
         goals: Business goals string ('traffic', 'leads', etc.)
         geo: Geographic target for locale-specific scoring
         niche: Optional niche for specialized scoring
+        use_ctr_adjustment: Whether to apply SERP feature CTR adjustment (default: True)
         
     Returns:
         Dict mapping keyword -> opportunity score (0.0 - 1.0)
@@ -292,9 +451,11 @@ def opportunity_scores(
         br = business_relevance(intent, goals)  # 0.6..1.0
         v = m.get("search_volume", 0.0)
         d = m.get("difficulty", 0.5)
+        ctr = m.get("ctr_potential", 1.0) if use_ctr_adjustment else 1.0
         
-        # Base score formula
-        base_score = v * (1.0 - d) * br
+        # Base score formula with CTR adjustment
+        # CTR potential reduces score for keywords where SERP features dominate
+        base_score = v * ctr * (1.0 - d) * br
         
         # Add commercial boost for lead-focused goals
         if prioritize_leads:

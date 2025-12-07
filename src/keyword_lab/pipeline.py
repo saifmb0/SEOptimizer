@@ -216,6 +216,10 @@ def run_pipeline(
             m = metrics.get(kw, {})
             # Get parent topic (fallback to first word if not assigned)
             pt = parent_topics.get(kw, parent_topics.get(kw.lower(), kw.split()[0] if kw else "general"))
+            
+            # Get SERP features if available
+            serp_features = m.get("serp_features", [])
+            
             it = {
                 "keyword": kw.lower(),
                 "cluster": cname.lower(),
@@ -224,6 +228,8 @@ def run_pipeline(
                 "funnel_stage": to_funnel_stage(intents.get(kw, "informational")),
                 "search_volume": float(m.get("search_volume", 0.0)),
                 "difficulty": float(m.get("difficulty", 0.0)),
+                "ctr_potential": float(m.get("ctr_potential", 1.0)),
+                "serp_features": serp_features,
                 "estimated": bool(m.get("estimated", True)),
                 "validated": bool(m.get("validated", False)),
                 "opportunity_score": float(min(1.0, max(0.0, opp.get(kw, 0.0)))),

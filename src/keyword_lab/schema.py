@@ -17,13 +17,16 @@ COMPACT_SCHEMA = {
             "funnel_stage": {"type": "string", "enum": ["TOFU", "MOFU", "BOFU"]},
             "search_volume": {"type": "number", "minimum": 0},
             "difficulty": {"type": "number", "minimum": 0, "maximum": 1},
+            "ctr_potential": {"type": "number", "minimum": 0, "maximum": 1},
+            "serp_features": {"type": "array", "items": {"type": "string"}},
             "estimated": {"type": "boolean"},
             "validated": {"type": "boolean"},
             "opportunity_score": {"type": "number", "minimum": 0, "maximum": 1}
         },
         "required": [
             "keyword", "cluster", "parent_topic", "intent", "funnel_stage",
-            "search_volume", "difficulty", "estimated", "validated", "opportunity_score"
+            "search_volume", "difficulty", "ctr_potential", "serp_features",
+            "estimated", "validated", "opportunity_score"
         ]
     }
 }
