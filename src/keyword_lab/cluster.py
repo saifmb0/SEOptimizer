@@ -15,6 +15,12 @@ except ImportError:
         "Falling back to TF-IDF vectorization."
     )
 
+# Recommended models for different use cases
+# multi-qa-MiniLM-L6-cos-v1: Optimized for question/answer retrieval (best for GEO/SGE)
+# all-MiniLM-L6-v2: General purpose semantic similarity
+DEFAULT_EMBEDDING_MODEL = "sentence-transformers/multi-qa-MiniLM-L6-cos-v1"
+FALLBACK_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+
 # Default intent rules (can be overridden via config)
 DEFAULT_INTENT_RULES = {
     "informational": ["who", "what", "why", "how", "guide", "tutorial", "tips", "checklist", "template"],
@@ -59,14 +65,38 @@ def infer_intent(
     return "informational"
 
 
-def vectorize_keywords(keywords: List[str]):
+def vectorize_keywords(keywords: List[str], model_name: Optional[str] = None):
+    """
+    Vectorize keywords for clustering.
+    
+    Uses sentence-transformers if available, with multi-qa-MiniLM-L6-cos-v1
+    as the default model (optimized for Q&A retrieval, ideal for GEO/SGE).
+    Falls back to TF-IDF if sentence-transformers not installed.
+    
+    Args:
+        keywords: List of keywords to vectorize
+        model_name: Optional specific model name override
+        
+    Returns:
+        numpy array of embeddings
+    """
     if HAS_ST and keywords:
+        # Use Q&A-optimized model for better GEO alignment
+        model_to_use = model_name or DEFAULT_EMBEDDING_MODEL
         try:
-            model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            model = SentenceTransformer(model_to_use)
             X = model.encode(keywords, show_progress_bar=False, normalize_embeddings=True)
+            logging.debug(f"Vectorized {len(keywords)} keywords with {model_to_use}")
             return np.array(X)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"Failed to load {model_to_use}: {e}, trying fallback")
+            try:
+                model = SentenceTransformer(FALLBACK_EMBEDDING_MODEL)
+                X = model.encode(keywords, show_progress_bar=False, normalize_embeddings=True)
+                return np.array(X)
+            except Exception:
+                pass
+    # Fallback to TF-IDF
     vec = TfidfVectorizer(stop_words="english")
     X = vec.fit_transform(keywords)
     return X.toarray()
