@@ -1,4 +1,3 @@
-import json
 from keyword_lab.schema import COMPACT_SCHEMA, validate_items
 from jsonschema import validate
 
