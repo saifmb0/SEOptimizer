@@ -258,6 +258,83 @@ def brief(
         console.print(full_output)
 
 
+@app.command("geo-brief")
+def geo_brief(
+    input_file: str = typer.Argument(..., help="Path to keywords JSON file"),
+    cluster: Optional[str] = typer.Option(None, "--cluster", "-c", help="Specific cluster to generate brief for"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output markdown file (default: stdout)"),
+    geo: str = typer.Option("ae", "--geo", "-g", help="Target geography (ae, sa, qa, etc.)"),
+    niche: Optional[str] = typer.Option(None, "--niche", "-n", help="Niche/vertical (contracting, real_estate, etc.)"),
+    provider: str = typer.Option("auto", "--provider", help="LLM provider for brief generation"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """
+    Generate a GEO-enhanced content brief for UAE/Gulf markets.
+    
+    Creates a locale-specific SEO content brief with:
+    - Geographic entity analysis (Emirates, districts, landmarks)
+    - UAE-specific regulatory requirements
+    - Local trust signals and schema recommendations
+    - Location-based keyword variations
+    
+    Example:
+        keyword-lab geo-brief keywords.json --geo ae --niche contracting -o brief.md
+    """
+    from .llm import _detect_provider
+    
+    setup_logging(verbose)
+    
+    # Load keywords file
+    try:
+        with open(input_file, 'r') as f:
+            items = json.load(f)
+    except Exception as e:
+        err_console.print(f"[red]Error loading {input_file}: {e}[/red]")
+        sys.exit(1)
+    
+    if not items:
+        err_console.print("[yellow]No keywords found in file.[/yellow]")
+        sys.exit(1)
+    
+    # Filter by cluster if specified
+    if cluster:
+        items = [i for i in items if i.get("cluster", "").lower() == cluster.lower()]
+        if not items:
+            err_console.print(f"[yellow]No keywords found in cluster '{cluster}'[/yellow]")
+            sys.exit(1)
+    
+    # Group by cluster
+    clusters_data: Dict[str, List[dict]] = {}
+    for item in items:
+        c = item.get("cluster", "unknown")
+        if c not in clusters_data:
+            clusters_data[c] = []
+        clusters_data[c].append(item)
+    
+    # Show GEO targeting info
+    console.print(Panel(
+        f"[bold]Geo:[/bold] {geo.upper()}\n"
+        f"[bold]Niche:[/bold] {niche or 'general'}\n"
+        f"[bold]Clusters:[/bold] {len(clusters_data)}",
+        title="🌍 GEO Brief Generator",
+        border_style="green",
+    ))
+    
+    # Generate GEO-enhanced briefs
+    briefs = []
+    for cluster_name, keywords in clusters_data.items():
+        brief_md = _generate_geo_brief(cluster_name, keywords, provider, geo, niche)
+        briefs.append(brief_md)
+    
+    full_output = "\n\n---\n\n".join(briefs)
+    
+    if output:
+        Path(output).write_text(full_output)
+        console.print(f"[green]✓[/green] Saved GEO brief to {output}")
+    else:
+        console.print(full_output)
+
+
 def _generate_content_brief(cluster_name: str, keywords: List[dict], provider: str) -> str:
     """Generate a content brief for a cluster of keywords."""
     from .llm import _detect_provider, HAS_GENAI, HAS_LITELLM
@@ -322,6 +399,166 @@ def _generate_content_brief(cluster_name: str, keywords: List[dict], provider: s
             logging.debug(f"LLM brief enhancement failed: {e}")
     
     return brief
+
+
+def _generate_geo_brief(
+    cluster_name: str, 
+    keywords: List[dict], 
+    provider: str, 
+    geo: str = "ae",
+    niche: Optional[str] = None,
+) -> str:
+    """Generate a GEO-enhanced content brief for UAE/Gulf markets."""
+    from .llm import _detect_provider, HAS_GENAI, HAS_LITELLM
+    from .entities import extract_entities, UAE_EMIRATES
+    import os
+    
+    # Sort by opportunity score
+    keywords = sorted(keywords, key=lambda k: k.get("opportunity_score", 0), reverse=True)
+    
+    # Extract key data
+    kw_list = [k["keyword"] for k in keywords]
+    intents = set(k.get("intent", "informational") for k in keywords)
+    primary_intent = max(intents, key=lambda i: sum(1 for k in keywords if k.get("intent") == i))
+    avg_volume = sum(k.get("search_volume", 0) for k in keywords) / len(keywords)
+    avg_difficulty = sum(k.get("difficulty", 0) for k in keywords) / len(keywords)
+    avg_ctr = sum(k.get("ctr_potential", 1.0) for k in keywords) / len(keywords)
+    
+    questions = [k["keyword"] for k in keywords if any(
+        k["keyword"].startswith(q) for q in ["how", "what", "why", "when", "where", "which", "who"]
+    )]
+    
+    # Extract geographic entities
+    entities = []
+    emirates_mentioned = set()
+    districts_mentioned = set()
+    
+    for kw in kw_list:
+        ent = extract_entities(kw, geo)
+        if ent["is_local"]:
+            if ent["emirate"]:
+                emirates_mentioned.add(ent["emirate"])
+            if ent["district"]:
+                districts_mentioned.add(ent["district"])
+    
+    # Build GEO-enhanced brief
+    detected_provider = _detect_provider() if provider == "auto" else provider
+    h1_suggestion = kw_list[0].title() if kw_list else cluster_name.title()
+    
+    # Get locale-specific terms
+    locale_terms = []
+    if niche == "contracting":
+        locale_terms = [
+            "Civil Defense approval", "Municipality permit", "NOC",
+            "fit-out", "MEP", "HVAC", "turnkey", "BOQ"
+        ]
+    
+    brief = f"""# GEO Content Brief: {cluster_name.replace('-', ' ').title()}
+
+## Market Overview
+- **Target Geo:** {UAE_EMIRATES.get(geo, {}).get('name', geo.upper())}
+- **Primary Intent:** {primary_intent.title()}
+- **Keywords:** {len(keywords)}
+- **Avg. Search Volume Score:** {avg_volume:.2f}
+- **Avg. Difficulty Score:** {avg_difficulty:.2f}
+- **Avg. CTR Potential:** {avg_ctr:.2f}
+
+## Suggested H1
+> {h1_suggestion}
+
+## Target Keywords
+{chr(10).join(f"- {kw}" for kw in kw_list[:10])}
+{"" if len(kw_list) <= 10 else f"- ... and {len(kw_list) - 10} more"}
+
+## Geographic Targeting
+- **Emirates Covered:** {', '.join(emirates_mentioned) if emirates_mentioned else 'None specified (consider adding location modifiers)'}
+- **Districts/Areas:** {', '.join(list(districts_mentioned)[:5]) if districts_mentioned else 'N/A'}
+- **Recommended Location Variants:** {', '.join([f"{kw_list[0]} {e}" for e in list(UAE_EMIRATES.keys())[:3]]) if kw_list else 'N/A'}
+
+## Questions to Answer
+{chr(10).join(f"- {q}" for q in questions[:8]) if questions else "- No question-style keywords detected"}
+
+## Content Recommendations
+- **Funnel Stage:** {_get_dominant_funnel(keywords)}
+- **Word Count:** {_suggest_word_count(primary_intent)}
+- **Content Type:** {_suggest_content_type(primary_intent)}
+
+## UAE/Gulf-Specific Requirements
+- [ ] Include local regulatory terms ({', '.join(locale_terms[:4]) if locale_terms else 'permits, approvals, licenses'})
+- [ ] Reference specific Emirates ({', '.join(list(emirates_mentioned)[:3]) if emirates_mentioned else 'Dubai, Abu Dhabi'})
+- [ ] Add local trust signals (DED license, years in UAE, local portfolio)
+- [ ] Include UAE-relevant pricing info (AED, VAT considerations)
+- [ ] Add location-specific schema markup (LocalBusiness, Service)
+
+## SEO Checklist
+- [ ] Include primary keyword in H1
+- [ ] Address top questions in H2/H3 subheadings
+- [ ] Add internal links to related service pages
+- [ ] Include relevant UAE entities/topics
+- [ ] Optimize meta description with key terms + location
+- [ ] Add FAQ schema for featured snippet potential
+- [ ] Include business schema with UAE address
+"""
+    
+    # Try to enhance with LLM if available
+    if detected_provider and detected_provider != "none":
+        try:
+            enhanced = _enhance_geo_brief_with_llm(cluster_name, kw_list, detected_provider, geo, niche)
+            if enhanced:
+                brief += f"\n## AI-Generated Local Insights\n{enhanced}\n"
+        except Exception as e:
+            logging.debug(f"LLM GEO brief enhancement failed: {e}")
+    
+    return brief
+
+
+def _enhance_geo_brief_with_llm(
+    cluster_name: str, 
+    keywords: List[str], 
+    provider: str,
+    geo: str,
+    niche: Optional[str],
+) -> str:
+    """Use LLM to add UAE/Gulf-specific insights to the brief."""
+    from .llm import HAS_GENAI, HAS_LITELLM
+    import os
+    
+    niche_context = f" in the {niche} industry" if niche else ""
+    
+    prompt = f"""Analyze these SEO keywords for UAE{niche_context} and provide:
+1. A compelling meta description (150-160 chars) targeting UAE customers
+2. 3 UAE-specific entities/topics that MUST be mentioned for local authority
+3. 2 local regulations or permits relevant to this topic
+4. 1 content angle that competitors in the UAE market likely miss
+
+Keywords: {', '.join(keywords[:15])}
+Geo: {geo.upper()}
+Niche: {niche or 'general'}
+
+Be concise. Focus on UAE/Gulf market specifics. Format as bullet points."""
+
+    try:
+        if provider == "gemini" and HAS_GENAI:
+            import google.generativeai as genai
+            api_key = os.getenv("GEMINI_API_KEY", "")
+            if api_key:
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-2.0-flash")
+                resp = model.generate_content(prompt)
+                return getattr(resp, "text", "")
+        elif HAS_LITELLM:
+            import litellm
+            model = "gpt-4o-mini" if os.getenv("OPENAI_API_KEY") else "claude-3-haiku-20240307"
+            response = litellm.completion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=600,
+            )
+            return response.choices[0].message.content or ""
+    except Exception as e:
+        logging.debug(f"LLM GEO enhancement failed: {e}")
+    
+    return ""
 
 
 def _get_dominant_funnel(keywords: List[dict]) -> str:
