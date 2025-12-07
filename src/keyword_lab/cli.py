@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.panel import Panel
 
 from .pipeline import run_pipeline
-from .config import load_config
+from .config import load_config, ConfigValidationError
 
 # Initialize rich console
 console = Console()
@@ -113,8 +113,15 @@ def run(
     if audience is None:
         audience = typer.prompt("👥 Enter target audience")
 
-    # Load config with defaults
-    cfg = load_config(config_path)
+    # Load config with defaults and validation
+    try:
+        cfg = load_config(config_path)
+    except ConfigValidationError as e:
+        err_console.print(f"[bold red]Configuration Error:[/bold red]")
+        for error in e.errors:
+            err_console.print(f"  [red]•[/red] {error}")
+        err_console.print("\n[dim]Check your config.yaml for typos or invalid values.[/dim]")
+        sys.exit(2)
 
     comp_list: List[str] = [c.strip() for c in competitors.split(",") if c.strip()]
 
