@@ -25,12 +25,15 @@ def raw_difficulty_proxy(keyword: str, total_results: Optional[int] = None) -> f
 
 def business_relevance(intent: str, goals: str) -> float:
     g = goals.lower()
-    if any(k in g for k in ["sales", "revenue", "leads"]):
+    # Match sales/revenue/lead (catches 'leads', 'lead generation', etc.)
+    if any(k in g for k in ["sales", "revenue", "lead"]):
         if intent in ("transactional", "commercial"):
             return 1.0
-    if any(k in g for k in ["traffic", "brand", "awareness"]):
+    # Match traffic/brand awareness goals
+    if any(k in g for k in ["traffic", "brand", "awareness", "exposure"]):
         if intent in ("informational", "navigational"):
             return 0.8
+    # Default fallback
     return 0.6
 
 
