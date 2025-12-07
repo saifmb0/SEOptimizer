@@ -28,7 +28,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v
+          python -m pytest tests/ -v
 
       - name: Check code style with Ruff
         run: |
