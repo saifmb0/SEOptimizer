@@ -1,0 +1,24 @@
+seed_topic: "best coffee beans"
+audience: "home baristas"
+geo: "global"
+language: "en"
+competitors: []
+business_goals: "traffic, leads"
+capabilities: "no-paid-apis"
+time_horizon: "quarter"
+max_clusters: 8
+max_keywords_per_cluster: 12
+sources: null
+query: null
+provider: none
+output: keywords.json
+save_csv: null
+verbose: false
+nlp:
+  ngram_min_df: 2
+  top_terms_per_doc: 10
+scrape:
+  timeout: 10
+  retries: 2
+  user_agent: "keyword-lab/1.0"
+  max_serp_results: 10
