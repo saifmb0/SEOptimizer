@@ -12,6 +12,7 @@ def test_schema_validation():
             "search_volume": 200,
             "difficulty": 0.4,
             "estimated": True,
+            "validated": True,
             "opportunity_score": 0.5,
         }
     ]

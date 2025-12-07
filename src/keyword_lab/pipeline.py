@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import numpy as np
 from dotenv import load_dotenv
 
-from .scrape import acquire_documents, Document
+from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete
 from .nlp import generate_candidates, clean_text, DEFAULT_QUESTION_PREFIXES, seed_expansions
 from .cluster import cluster_keywords, infer_intent
 from .metrics import compute_metrics, opportunity_scores
@@ -134,9 +134,26 @@ def run_pipeline(
     competitor_list = [c.strip() for c in (competitors or []) if c.strip()]
     intents = {kw: infer_intent(kw, competitor_list, intent_rules) for kw in candidates}
 
-    # Metrics (0–1 scale)
-    serp_total = None
-    metrics = compute_metrics(candidates, clusters, intents, freq, qset, provider, serp_total)
+    # Validate keywords with Google Autocomplete (if enabled)
+    validation_cfg = (config or {}).get("validation", {})
+    validated_keywords: Dict[str, bool] = {}
+    if validation_cfg.get("autocomplete_enabled", True) and not dry_run:
+        # Limit to top candidates by frequency to avoid rate limiting
+        top_candidates = sorted(candidates, key=lambda k: freq.get(k, 0), reverse=True)
+        max_validate = int(validation_cfg.get("max_autocomplete_checks", 100))
+        validated_keywords = validate_keywords_with_autocomplete(
+            top_candidates[:max_validate],
+            language=language,
+            country=geo if len(geo) == 2 else "us",
+            delay=float(validation_cfg.get("autocomplete_delay", 0.1)),
+        )
+
+    # Metrics (0–1 scale) with autocomplete validation
+    metrics = compute_metrics(
+        candidates, clusters, intents, freq, qset, provider,
+        serp_total_results=None,  # TODO: pass per-keyword SERP counts when available
+        validated_keywords=validated_keywords,
+    )
     opp = opportunity_scores(metrics, intents, business_goals)
 
     # Assemble per cluster, prioritize opportunity score within clusters
@@ -153,14 +170,16 @@ def run_pipeline(
             if len(selected) >= max_keywords_per_cluster:
                 break
         for kw in selected:
+            m = metrics.get(kw, {})
             it = {
                 "keyword": kw.lower(),
                 "cluster": cname.lower(),
                 "intent": intents.get(kw, "informational"),
                 "funnel_stage": to_funnel_stage(intents.get(kw, "informational")),
-                "search_volume": float(metrics.get(kw, {}).get("search_volume", 0.0)),
-                "difficulty": float(metrics.get(kw, {}).get("difficulty", 0.0)),
-                "estimated": bool(metrics.get(kw, {}).get("estimated", True)),
+                "search_volume": float(m.get("search_volume", 0.0)),
+                "difficulty": float(m.get("difficulty", 0.0)),
+                "estimated": bool(m.get("estimated", True)),
+                "validated": bool(m.get("validated", False)),
                 "opportunity_score": float(min(1.0, max(0.0, opp.get(kw, 0.0)))),
             }
             items.append(it)

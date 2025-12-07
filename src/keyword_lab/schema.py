@@ -9,17 +9,20 @@ COMPACT_SCHEMA = {
             "keyword": {"type": "string"},
             "cluster": {"type": "string"},
             "intent": {"type": "string", "enum": [
-                "informational", "commercial", "transactional", "navigational"
+                "informational", "commercial", "transactional", "navigational",
+                # GEO-centric intents (added in Week 2)
+                "direct_answer", "complex_research", "comparative", "local"
             ]},
             "funnel_stage": {"type": "string", "enum": ["TOFU", "MOFU", "BOFU"]},
             "search_volume": {"type": "number", "minimum": 0},
             "difficulty": {"type": "number", "minimum": 0, "maximum": 1},
             "estimated": {"type": "boolean"},
+            "validated": {"type": "boolean"},
             "opportunity_score": {"type": "number", "minimum": 0, "maximum": 1}
         },
         "required": [
             "keyword", "cluster", "intent", "funnel_stage",
-            "search_volume", "difficulty", "estimated", "opportunity_score"
+            "search_volume", "difficulty", "estimated", "validated", "opportunity_score"
         ]
     }
 }
