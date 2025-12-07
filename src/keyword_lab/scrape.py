@@ -5,8 +5,8 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Optional, Callable
-from urllib.parse import urlparse
+from typing import List, Dict, Optional, Callable, Set
+from urllib.parse import urlparse, urlencode, quote_plus
 from urllib import robotparser
 
 import requests
@@ -49,6 +49,116 @@ class Document:
     url: str
     title: str
     text: str
+
+
+# ============================================================================
+# Google Autocomplete / Autosuggest API
+# ============================================================================
+
+@lru_cache(maxsize=512)
+def get_google_suggestions(query: str, language: str = "en", country: str = "us") -> tuple:
+    """
+    Fetch Google Autocomplete suggestions for a query.
+    
+    Uses Google's public autocomplete endpoint (no API key needed for low volume).
+    Results are cached to avoid repeated requests.
+    
+    Args:
+        query: Search query to get suggestions for
+        language: Language code (e.g., 'en')
+        country: Country code (e.g., 'us')
+        
+    Returns:
+        Tuple of suggestion strings (tuple for hashability/caching)
+    """
+    if not query or len(query.strip()) < 2:
+        return ()
+    
+    # Google Autocomplete endpoint
+    base_url = "https://suggestqueries.google.com/complete/search"
+    params = {
+        "client": "firefox",  # Returns clean JSON
+        "q": query.strip(),
+        "hl": language,
+        "gl": country,
+    }
+    
+    try:
+        headers = {"User-Agent": DEFAULT_UA}
+        resp = requests.get(
+            f"{base_url}?{urlencode(params)}", 
+            headers=headers, 
+            timeout=5
+        )
+        resp.raise_for_status()
+        
+        # Response format: [query, [suggestion1, suggestion2, ...]]
+        data = resp.json()
+        if isinstance(data, list) and len(data) >= 2:
+            suggestions = data[1]
+            if isinstance(suggestions, list):
+                # Clean and normalize suggestions
+                cleaned = []
+                for s in suggestions:
+                    if isinstance(s, str):
+                        s = s.strip().lower()
+                        if s and s != query.lower():
+                            cleaned.append(s)
+                logging.debug(f"Google suggestions for '{query}': {len(cleaned)} results")
+                return tuple(cleaned)
+    except Exception as e:
+        logging.debug(f"Google autocomplete failed for '{query}': {e}")
+    
+    return ()
+
+
+def validate_keywords_with_autocomplete(
+    keywords: List[str],
+    language: str = "en",
+    country: str = "us",
+    delay: float = 0.1,
+) -> Dict[str, bool]:
+    """
+    Validate a list of keywords against Google Autocomplete.
+    
+    A keyword is "validated" if it appears in autocomplete suggestions,
+    indicating real search demand.
+    
+    Args:
+        keywords: List of keywords to validate
+        language: Language code
+        country: Country code
+        delay: Delay between requests to avoid rate limiting
+        
+    Returns:
+        Dict mapping keyword -> validated (True if appears in autocomplete)
+    """
+    validated: Dict[str, bool] = {}
+    
+    for i, kw in enumerate(keywords):
+        if not kw:
+            continue
+            
+        # Use first few words as query prefix
+        words = kw.split()
+        prefix = " ".join(words[:2]) if len(words) > 2 else kw
+        
+        suggestions = get_google_suggestions(prefix, language, country)
+        
+        # Check if the keyword (or close variant) appears in suggestions
+        kw_lower = kw.lower()
+        is_validated = any(
+            kw_lower in s or s in kw_lower 
+            for s in suggestions
+        )
+        validated[kw] = is_validated
+        
+        # Rate limiting - only delay if not cached
+        if i > 0 and delay > 0:
+            time.sleep(delay)
+    
+    logging.info(f"Validated {sum(validated.values())}/{len(keywords)} keywords via autocomplete")
+    return validated
 
 
 @lru_cache(maxsize=128)
