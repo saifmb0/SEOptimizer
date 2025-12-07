@@ -1,4 +1,20 @@
+"""Keyword Lab - SEO keyword discovery and clustering CLI."""
+
+# Import typed config classes for convenience
+from keyword_lab.config import (
+    KeywordLabConfig,
+    IntentRulesConfig,
+    NlpConfig,
+    ScrapeConfig,
+    ClusterConfig,
+    LlmConfig,
+    OutputConfig,
+    load_config,
+    ConfigValidationError,
+)
+
 __all__ = [
+    # Modules
     "io",
     "scrape",
     "nlp",
@@ -6,6 +22,17 @@ __all__ = [
     "metrics",
     "schema",
     "pipeline",
+    "config",
+    # Config types
+    "KeywordLabConfig",
+    "IntentRulesConfig",
+    "NlpConfig",
+    "ScrapeConfig",
+    "ClusterConfig",
+    "LlmConfig",
+    "OutputConfig",
+    "load_config",
+    "ConfigValidationError",
 ]
 
 __version__ = "0.1.0"

@@ -2,10 +2,82 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from typing_extensions import TypedDict, NotRequired
 
 import yaml
 from jsonschema import Draft7Validator, ValidationError
+
+
+# ============================================================================
+# Typed Configuration Dictionaries
+# ============================================================================
+
+class IntentRulesConfig(TypedDict, total=False):
+    """Intent classification rules mapping intent types to keyword patterns."""
+    informational: List[str]
+    commercial: List[str]
+    transactional: List[str]
+    navigational: List[str]
+
+
+class NlpConfig(TypedDict, total=False):
+    """NLP processing configuration."""
+    ngram_min_df: int
+    ngram_range: Tuple[int, int]
+    top_terms_per_doc: int
+
+
+class ScrapeConfig(TypedDict, total=False):
+    """Web scraping configuration."""
+    timeout: int
+    retries: int
+    user_agent: str
+    max_serp_results: int
+    cache_enabled: bool
+    cache_dir: str
+
+
+class ClusterConfig(TypedDict, total=False):
+    """Clustering algorithm configuration."""
+    max_clusters: int
+    max_keywords_per_cluster: int
+    random_state: int
+    use_silhouette: bool
+    silhouette_k_range: Tuple[int, int]
+
+
+class LlmConfig(TypedDict, total=False):
+    """LLM provider configuration."""
+    provider: str  # "auto", "gemini", "openai", "anthropic", "none"
+    max_expansion_results: int
+    model: Optional[str]
+
+
+class OutputConfig(TypedDict, total=False):
+    """Output format configuration."""
+    format: str  # "json", "csv", "xlsx"
+    pretty_print: bool
+
+
+class KeywordLabConfig(TypedDict, total=False):
+    """
+    Complete Keyword Lab configuration schema.
+    
+    All fields are optional as they fall back to defaults.
+    Use load_config() to get a fully merged configuration.
+    
+    Example:
+        >>> config = load_config("config.yaml")
+        >>> clusters = config.get("cluster", {}).get("max_clusters", 10)
+    """
+    intent_rules: IntentRulesConfig
+    question_prefixes: List[str]
+    nlp: NlpConfig
+    scrape: ScrapeConfig
+    cluster: ClusterConfig
+    llm: LlmConfig
+    output: OutputConfig
 
 
 # JSON Schema for config validation
@@ -124,7 +196,7 @@ def load_default_config() -> Dict[str, Any]:
     return {}
 
 
-def load_config(config_path: Optional[str] = None, validate: bool = True) -> Dict[str, Any]:
+def load_config(config_path: Optional[str] = None, validate: bool = True) -> KeywordLabConfig:
     """
     Load configuration, merging user config with defaults.
     
@@ -137,7 +209,7 @@ def load_config(config_path: Optional[str] = None, validate: bool = True) -> Dic
         validate: Whether to validate config against schema
         
     Returns:
-        Merged configuration dictionary
+        Merged configuration dictionary with type hints
         
     Raises:
         ConfigValidationError: If validation is enabled and config is invalid
@@ -166,7 +238,7 @@ def load_config(config_path: Optional[str] = None, validate: bool = True) -> Dic
     return config
 
 
-def get_intent_rules(config: Dict[str, Any]) -> Dict[str, list]:
+def get_intent_rules(config: KeywordLabConfig) -> IntentRulesConfig:
     """Get intent rules from config, with fallback defaults."""
     return config.get("intent_rules", {
         "informational": ["who", "what", "why", "how", "guide", "tutorial", "tips", "checklist", "template"],
@@ -176,7 +248,7 @@ def get_intent_rules(config: Dict[str, Any]) -> Dict[str, list]:
     })
 
 
-def get_question_prefixes(config: Dict[str, Any]) -> list:
+def get_question_prefixes(config: KeywordLabConfig) -> List[str]:
     """Get question prefixes from config, with fallback defaults."""
     return config.get("question_prefixes", [
         "how", "what", "best", "vs", "for", "near me", 
