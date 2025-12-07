@@ -11,7 +11,7 @@ def test_schema_validation():
             "intent": "commercial",
             "funnel_stage": "MOFU",
             "search_volume": 200,
-            "difficulty": 40,
+            "difficulty": 0.4,
             "estimated": True,
             "opportunity_score": 0.5,
         }
