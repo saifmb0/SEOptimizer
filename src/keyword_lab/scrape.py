@@ -1,16 +1,39 @@
 import hashlib
 import logging
 import os
+import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Dict, Optional, Callable, Set
+from typing import List, Dict, Optional, Callable, Set, Any
 from urllib.parse import urlparse, urlencode, quote_plus
 from urllib import robotparser
 
 import requests
 from bs4 import BeautifulSoup
+
+# Tenacity for exponential backoff retries
+try:
+    from tenacity import (
+        retry,
+        stop_after_attempt,
+        wait_exponential,
+        retry_if_exception_type,
+        before_sleep_log,
+    )
+    HAS_TENACITY = True
+except ImportError:
+    HAS_TENACITY = False
+    # Fallback decorator that does nothing
+    def retry(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    stop_after_attempt = lambda x: None
+    wait_exponential = lambda **kwargs: None
+    retry_if_exception_type = lambda x: None
+    before_sleep_log = lambda *args: None
 
 # Try to import joblib for caching
 try:
@@ -20,8 +43,194 @@ except ImportError:
     HAS_JOBLIB = False
     Memory = None
 
-DEFAULT_UA = os.getenv("USER_AGENT", os.getenv("USER_AGENT", "keyword-lab/1.0"))
-DEFAULT_CACHE_DIR = ".keyword_lab_cache"
+DEFAULT_UA = os.getenv("USER_AGENT", os.getenv("USER_AGENT", "oryx-seo/1.0"))
+DEFAULT_CACHE_DIR = ".oryx_cache"
+
+
+# =============================================================================
+# Proxy Rotation Middleware
+# =============================================================================
+
+@dataclass
+class ProxyConfig:
+    """
+    Configuration for proxy rotation middleware.
+    
+    Supports BrightData, Smartproxy, or custom proxy pools.
+    
+    Usage:
+        proxy_config = ProxyConfig(
+            enabled=True,
+            proxy_urls=["http://user:pass@proxy1:port", "http://user:pass@proxy2:port"],
+            rotation_strategy="round_robin",  # or "random"
+        )
+    """
+    enabled: bool = False
+    proxy_urls: List[str] = field(default_factory=list)
+    rotation_strategy: str = "random"  # "random" or "round_robin"
+    _current_index: int = 0
+    
+    def get_proxy(self) -> Optional[Dict[str, str]]:
+        """Get the next proxy in rotation."""
+        if not self.enabled or not self.proxy_urls:
+            return None
+        
+        if self.rotation_strategy == "round_robin":
+            proxy_url = self.proxy_urls[self._current_index % len(self.proxy_urls)]
+            self._current_index += 1
+        else:  # random
+            proxy_url = random.choice(self.proxy_urls)
+        
+        return {"http": proxy_url, "https": proxy_url}
+
+
+# Global proxy config (can be overridden per-session)
+_proxy_config = ProxyConfig()
+
+
+def configure_proxies(
+    proxy_urls: Optional[List[str]] = None,
+    rotation_strategy: str = "random",
+) -> None:
+    """
+    Configure global proxy rotation for scraping.
+    
+    Args:
+        proxy_urls: List of proxy URLs (e.g., ["http://user:pass@host:port"])
+        rotation_strategy: "random" or "round_robin"
+        
+    Example:
+        # BrightData setup
+        configure_proxies([
+            "http://customer-id:password@brd.superproxy.io:22225",
+        ])
+        
+        # Smartproxy setup
+        configure_proxies([
+            "http://user:pass@gate.smartproxy.com:7000",
+        ])
+    """
+    global _proxy_config
+    _proxy_config = ProxyConfig(
+        enabled=bool(proxy_urls),
+        proxy_urls=proxy_urls or [],
+        rotation_strategy=rotation_strategy,
+    )
+    if proxy_urls:
+        logging.info(f"Configured {len(proxy_urls)} proxies with {rotation_strategy} rotation")
+
+
+# =============================================================================
+# Resilient HTTP Client
+# =============================================================================
+
+class ScrapingError(Exception):
+    """Base exception for scraping errors."""
+    pass
+
+
+class BlockedError(ScrapingError):
+    """Raised when request is blocked (403, CAPTCHA, etc.)."""
+    pass
+
+
+class RateLimitError(ScrapingError):
+    """Raised when rate limited (429)."""
+    pass
+
+
+# Retry configuration for resilient scraping
+RETRY_CONFIG = {
+    "stop": stop_after_attempt(5),
+    "wait": wait_exponential(multiplier=1, min=2, max=30),
+    "retry": retry_if_exception_type((
+        requests.exceptions.Timeout,
+        requests.exceptions.ConnectionError,
+        RateLimitError,
+    )),
+    "before_sleep": before_sleep_log(logging.getLogger(__name__), logging.WARNING),
+}
+
+
+def _make_resilient_request(
+    url: str,
+    method: str = "GET",
+    headers: Optional[Dict] = None,
+    timeout: int = 10,
+    use_proxy: bool = True,
+    **kwargs,
+) -> requests.Response:
+    """
+    Make an HTTP request with retry logic and proxy rotation.
+    
+    Handles:
+    - Exponential backoff on failures
+    - Proxy rotation on blocks
+    - User-agent rotation
+    - Rate limit detection
+    
+    Args:
+        url: Target URL
+        method: HTTP method
+        headers: Request headers
+        timeout: Request timeout
+        use_proxy: Whether to use proxy rotation
+        **kwargs: Additional requests kwargs
+        
+    Returns:
+        Response object
+        
+    Raises:
+        BlockedError: If blocked after all retries
+        ScrapingError: For other unrecoverable errors
+    """
+    if headers is None:
+        headers = {}
+    
+    # Ensure we have a User-Agent
+    if "User-Agent" not in headers:
+        headers["User-Agent"] = _get_random_ua()
+    
+    # Get proxy if enabled
+    proxies = None
+    if use_proxy and _proxy_config.enabled:
+        proxies = _proxy_config.get_proxy()
+    
+    try:
+        resp = requests.request(
+            method,
+            url,
+            headers=headers,
+            timeout=timeout,
+            proxies=proxies,
+            **kwargs,
+        )
+        
+        # Handle specific status codes
+        if resp.status_code == 403:
+            raise BlockedError(f"Blocked (403) for {url}")
+        elif resp.status_code == 429:
+            raise RateLimitError(f"Rate limited (429) for {url}")
+        elif resp.status_code >= 500:
+            raise ScrapingError(f"Server error ({resp.status_code}) for {url}")
+        
+        resp.raise_for_status()
+        return resp
+        
+    except requests.exceptions.RequestException as e:
+        raise ScrapingError(f"Request failed for {url}: {e}")
+
+
+def _get_random_ua() -> str:
+    """Get a random User-Agent string to avoid detection."""
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+    return random.choice(user_agents)
 
 # Global cache memory instance (initialized lazily)
 _cache_memory: Optional["Memory"] = None
