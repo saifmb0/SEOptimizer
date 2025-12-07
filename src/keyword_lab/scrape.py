@@ -232,6 +232,106 @@ def _extract_visible_text(html: str, preserve_structure: bool = True) -> str:
     return "\n".join(texts)
 
 
+@dataclass
+class WeightedText:
+    """Text content with SEO importance weight."""
+    text: str
+    weight: float
+    source: str  # "title", "h1", "h2", "h3", "p", "li", "meta"
+
+
+# SEO weight factors for HTML elements
+HTML_WEIGHTS = {
+    "title": 4.0,
+    "h1": 3.0,
+    "h2": 2.0,
+    "h3": 1.5,
+    "meta_description": 2.5,
+    "meta_keywords": 2.0,
+    "p": 1.0,
+    "li": 1.0,
+    "a": 0.8,
+}
+
+
+def extract_weighted_text(html: str) -> List[WeightedText]:
+    """
+    Extract text from HTML with SEO importance weights.
+    
+    Assigns weights based on HTML hierarchy:
+    - Title: 4x weight
+    - H1: 3x weight
+    - H2: 2x weight
+    - H3: 1.5x weight
+    - Meta description: 2.5x weight
+    - Paragraphs/Lists: 1x weight
+    
+    Args:
+        html: Raw HTML content
+        
+    Returns:
+        List of WeightedText objects with text, weight, and source tag
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    
+    # Remove non-content elements
+    for tag in soup(["script", "style", "noscript", "nav", "footer", "header"]):
+        tag.decompose()
+    
+    weighted_texts: List[WeightedText] = []
+    
+    # Extract title
+    title_tag = soup.find("title")
+    if title_tag:
+        text = title_tag.get_text(strip=True)
+        if text:
+            weighted_texts.append(WeightedText(text, HTML_WEIGHTS["title"], "title"))
+    
+    # Extract meta description
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    if meta_desc and meta_desc.get("content"):
+        text = meta_desc["content"].strip()
+        if text:
+            weighted_texts.append(WeightedText(text, HTML_WEIGHTS["meta_description"], "meta"))
+    
+    # Extract headers and content with weights
+    for tag_name, weight in [("h1", 3.0), ("h2", 2.0), ("h3", 1.5), ("p", 1.0), ("li", 1.0)]:
+        for el in soup.find_all(tag_name):
+            text = el.get_text(" ", strip=True)
+            if text and len(text) > 5:  # Skip very short text
+                weighted_texts.append(WeightedText(text, weight, tag_name))
+    
+    return weighted_texts
+
+
+def build_weighted_corpus(weighted_texts: List[WeightedText]) -> Dict[str, float]:
+    """
+    Build a term frequency dict with SEO weights applied.
+    
+    Args:
+        weighted_texts: List of WeightedText objects
+        
+    Returns:
+        Dict mapping term -> weighted frequency
+    """
+    from collections import Counter
+    import re
+    
+    weighted_freq: Dict[str, float] = {}
+    
+    for wt in weighted_texts:
+        # Simple tokenization
+        words = re.findall(r'\b[a-z]{2,}\b', wt.text.lower())
+        counts = Counter(words)
+        
+        for word, count in counts.items():
+            if word not in weighted_freq:
+                weighted_freq[word] = 0.0
+            weighted_freq[word] += count * wt.weight
+    
+    return weighted_freq
+
+
 def _fetch_url_uncached(
     url: str, 
     timeout: int = 10, 
