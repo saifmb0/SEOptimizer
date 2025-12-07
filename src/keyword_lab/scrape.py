@@ -147,11 +147,67 @@ def fetch_url(
     return Document(url=result["url"], title=result["title"], text=result["text"])
 
 
+def parse_sitemap(sitemap_url: str, timeout: int = 15, user_agent: str = DEFAULT_UA) -> List[str]:
+    """
+    Parse a sitemap XML file and extract all URLs.
+    
+    Supports both regular sitemaps and sitemap index files.
+    
+    Args:
+        sitemap_url: URL to the sitemap.xml file
+        timeout: Request timeout
+        user_agent: User agent string
+        
+    Returns:
+        List of URLs found in the sitemap
+    """
+    urls: List[str] = []
+    
+    try:
+        headers = {"User-Agent": user_agent}
+        response = requests.get(sitemap_url, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, "xml")
+        
+        # Check if this is a sitemap index (contains other sitemaps)
+        sitemap_tags = soup.find_all("sitemap")
+        if sitemap_tags:
+            # This is a sitemap index, recursively parse each sitemap
+            for sitemap in sitemap_tags:
+                loc = sitemap.find("loc")
+                if loc and loc.text:
+                    child_urls = parse_sitemap(loc.text.strip(), timeout, user_agent)
+                    urls.extend(child_urls)
+        else:
+            # Regular sitemap with URLs
+            url_tags = soup.find_all("url")
+            for url_tag in url_tags:
+                loc = url_tag.find("loc")
+                if loc and loc.text:
+                    urls.append(loc.text.strip())
+        
+        logging.info(f"Parsed sitemap {sitemap_url}: found {len(urls)} URLs")
+        
+    except Exception as e:
+        logging.warning(f"Failed to parse sitemap {sitemap_url}: {e}")
+    
+    return urls
+
+
 def read_local_sources(path: str) -> List[Document]:
     import pathlib
 
     p = pathlib.Path(path)
     docs: List[Document] = []
+    
+    # Check if it's a sitemap URL
+    if path.startswith("http") and path.endswith(".xml"):
+        sitemap_urls = parse_sitemap(path)
+        for u in sitemap_urls:
+            docs.append(Document(url=u, title=u, text=""))
+        return docs
+    
     if p.is_file():
         # Treat as file of URLs
         try:
