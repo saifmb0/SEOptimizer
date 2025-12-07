@@ -3,26 +3,28 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "keyword-lab"
-version = "0.1.0"
-description = "CLI for discovering and clustering keywords"
+name = "oryx-keyword-lab"
+version = "4.0.0"
+description = "UAE-native Keyword Intelligence Engine for Abu Dhabi contracting sector"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "AGPL-3.0.-or-later" }
-authors = [{ name = "Keyword Lab Contributors" }]
+authors = [{ name = "ORYX Contributors" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Natural Language :: Arabic",
+    "Natural Language :: English",
 ]
-keywords = ["seo", "keywords", "clustering", "nlp", "cli"]
+keywords = ["seo", "keywords", "clustering", "nlp", "cli", "uae", "abu-dhabi", "arabic", "geo", "contracting"]
 dependencies = [
     "requests>=2.32.0,<3.0.0",
     "beautifulsoup4>=4.12.0,<5.0.0",
@@ -33,7 +35,8 @@ dependencies = [
     "rich>=13.0.0,<14.0.0",
     "python-dotenv>=1.0.0,<2.0.0",
     "pyyaml>=6.0,<7.0.0",
-    "jsonschema>=4.17.0,<5.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+    "tenacity>=8.2.0,<9.0.0",
     "typing_extensions>=4.0.0",
 ]
 
@@ -43,11 +46,16 @@ llm = ["google-generativeai>=0.8.0,<1.0.0", "litellm>=1.0.0,<2.0.0"]
 excel = ["openpyxl>=3.1.0,<4.0.0"]
 cache = ["joblib>=1.3.0,<2.0.0"]
 scrape = ["markdownify>=0.11.0,<1.0.0"]
+bilingual = ["camel-tools>=1.5.0,<2.0.0"]
 all = [
     "sentence-transformers>=2.2.0,<3.0.0",
     "google-generativeai>=0.8.0,<1.0.0",
     "litellm>=1.0.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
+    "joblib>=1.3.0,<2.0.0",
+    "markdownify>=0.11.0,<1.0.0",
+    "camel-tools>=1.5.0,<2.0.0",
+]
     "joblib>=1.3.0,<2.0.0",
     "markdownify>=0.11.0,<1.0.0",
 ]
@@ -62,12 +70,13 @@ dev = [
 ]
 
 [project.scripts]
+oryx = "keyword_lab.cli:app"
 keyword-lab = "keyword_lab.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/your-org/keyword-lab"
-Repository = "https://github.com/your-org/keyword-lab"
-Documentation = "https://github.com/your-org/keyword-lab#readme"
+Homepage = "https://github.com/your-org/oryx-keyword-lab"
+Repository = "https://github.com/your-org/oryx-keyword-lab"
+Documentation = "https://github.com/your-org/oryx-keyword-lab#readme"
 
 [tool.setuptools.packages.find]
 where = ["src"]

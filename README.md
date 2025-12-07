@@ -1,4 +1,6 @@
-# Keyword Lab 🔬
+# ORYX 🦌 - UAE Keyword Intelligence Engine
+
+> Formerly "Keyword Lab" — Now an enterprise-grade SEO intelligence platform optimized for the Abu Dhabi contracting sector.
 
 A powerful CLI tool that transforms seed topics into validated, ranked SEO keywords optimized for both traditional search and **Generative Engine Optimization (GEO)**. It extracts, validates, clusters, and scores keywords—giving you actionable content strategies.
 
@@ -9,9 +11,37 @@ A powerful CLI tool that transforms seed topics into validated, ranked SEO keywo
 - **Google Autocomplete Validation**: Verify keywords against real search suggestions
 - **Semantic Clustering**: Group keywords using Q&A-optimized embeddings
 - **Parent Topic Assignment**: Automatic hub-spoke silo architecture via LLM
-- **GEO-Centric Intent Classification**: 5 intent categories optimized for AI search
+- **GEO-Centric Intent Classification**: 8 intent categories optimized for AI search
 
-### New in v2.0
+### New in v4.0 - ORYX Enterprise Edition
+- 🛡️ **Resilient Scraping** - Tenacity retries with exponential backoff, proxy rotation
+- 🧹 **Smart DOM Extraction** - 4-phase noise filtering for legacy UAE sites
+- ✅ **Pydantic Validation** - Strict config and schema validation (V2)
+- 💾 **Crash Recovery** - SQLite checkpointing for long pipelines
+- 🏛️ **Abu Dhabi Entities** - Mussafah, ICAD, KIZAD, Masdar, TAMM, Estidama
+- 🔤 **Bilingual Processing** - 80+ Arabic-English construction terms, Gulf dialect
+- 🤖 **GEO Module** - Information gain scoring, schema generators, trust signals
+- 📊 **Professional Reports** - 8-sheet Excel with charts, conditional formatting
+- 📋 **Actionable Recommendations** - Auto-generated content strategy insights
+
+### Previous Releases
+
+<details>
+<summary>v3.0 - UAE/Gulf Market Specialization</summary>
+
+- 🇦🇪 **Arabic/English Bilingual Support** - Unicode text preprocessing, Arabic stopwords
+- 🌍 **Multilingual Embeddings** - paraphrase-multilingual-MiniLM-L12-v2 for Arabic clustering
+- 🔤 **Bilingual Autocomplete** - Fetch suggestions in both English and Arabic
+- 🏢 **UAE Entity Extraction** - Emirates, districts, landmarks, free zones
+- 💰 **Commercial Intent Scoring** - CPC proxy heuristics for lead-value optimization
+- 📉 **SERP Feature CTR Adjustment** - Realistic opportunity scores accounting for featured snippets
+- 🎯 **Niche Presets** - Ready-to-use configs for contracting, real estate, legal
+- 📋 **GEO Content Briefs** - UAE-specific regulatory requirements and local trust signals
+</details>
+
+<details>
+<summary>v2.0 - Core Enhancements</summary>
+
 - 🔍 **Google Autocomplete Validation** - Confirm keywords have real search volume
 - 📊 **Percentile Ranking** - Fairer scoring that preserves long-tail value
 - 🧠 **GEO Intent Categories** - `direct_answer`, `complex_research`, `transactional`, `local`, `comparative`
@@ -22,37 +52,51 @@ A powerful CLI tool that transforms seed topics into validated, ranked SEO keywo
 - 🚫 **Blacklist Filtering** - Exclude competitor/spam patterns
 - 🔍 **PAA Extraction** - People Also Ask questions from SerpAPI
 - ⚡ **Weighted HTML Extraction** - Priority extraction of H1-H3, meta, alt text
+</details>
 
-### New in v3.0 - UAE/Gulf Market Specialization
-- 🇦🇪 **Arabic/English Bilingual Support** - Unicode text preprocessing, Arabic stopwords
-- 🌍 **Multilingual Embeddings** - paraphrase-multilingual-MiniLM-L12-v2 for Arabic clustering
-- 🔤 **Bilingual Autocomplete** - Fetch suggestions in both English and Arabic
-- 🏢 **UAE Entity Extraction** - Emirates, districts, landmarks, free zones
-- 💰 **Commercial Intent Scoring** - CPC proxy heuristics for lead-value optimization
-- 📉 **SERP Feature CTR Adjustment** - Realistic opportunity scores accounting for featured snippets
-- 🎯 **Niche Presets** - Ready-to-use configs for contracting, real estate, legal
-- 📋 **GEO Content Briefs** - UAE-specific regulatory requirements and local trust signals
-- 📊 **Enhanced Excel Export** - Location analysis, intent breakdown, priority matrix
+## 🏗️ Architecture
+
+```
+src/keyword_lab/
+├── cli.py           # Typer CLI interface
+├── pipeline.py      # Main orchestration
+├── config.py        # Pydantic V2 configuration
+├── schema.py        # Pydantic V2 data models
+├── checkpoint.py    # SQLite crash recovery  [NEW v4.0]
+├── scrape.py        # Resilient web scraping  [ENHANCED v4.0]
+├── nlp.py           # Text processing & embeddings
+├── cluster.py       # K-means clustering
+├── llm.py           # LLM integration (Gemini/OpenAI/Anthropic)
+├── metrics.py       # Scoring algorithms
+├── entities.py      # UAE entity extraction  [EXPANDED v4.0]
+├── bilingual.py     # Arabic-English processing  [NEW v4.0]
+├── geo.py           # GEO optimization module  [NEW v4.0]
+└── io.py            # Professional Excel reports  [ENHANCED v4.0]
+```
 
 ## 🚀 Quick Start
 
 ### Installation
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[ml]"  # Includes sentence-transformers for better clustering
+pip install -e ".[ml,excel]"  # Includes ML + Excel exports
 python -m nltk.downloader stopwords
 ```
 
 ### Basic Usage
 ```bash
-# Run keyword discovery
-keyword-lab run --seed-topic "best coffee beans" --audience "home baristas"
+# Run keyword discovery for UAE contracting
+keyword-lab run \
+  --seed-topic "villa renovation abu dhabi" \
+  --audience "property owners" \
+  --geo "ae" \
+  --output report.xlsx
 
 # Generate content brief for a cluster
 keyword-lab brief keywords.json --cluster "cluster-0"
 
 # Run QA validation
-keyword-lab qa keywords.json --min-cluster-size 3 --max-words 6 --report
+keyword-lab qa keywords.json --min-cluster-size 3 --report
 ```
 
 ### Environment Variables
@@ -82,6 +126,10 @@ Each keyword item includes:
 | `estimated` | boolean | True if metrics are estimated |
 | `validated` | boolean | True if confirmed via Autocomplete |
 | `opportunity_score` | 0–1 | Combined opportunity metric |
+| `geo_suitability` | 0–1 | AI search optimization score |
+| `info_gain_score` | 0–1 | Content uniqueness score |
+| `uae_entities` | array | Detected UAE entities |
+| `emirate` | string | Target emirate |
 
 ### Intent Categories
 
@@ -152,39 +200,162 @@ nlp:
   ngram_min_df: 2
   top_terms_per_doc: 10
 
+# Scraping (v4.0 resilience features)
+scrape:
+  timeout: 30
+  retries: 3
+  proxy_enabled: false
+  proxy_urls: []
+  min_delay_ms: 500
+  max_delay_ms: 2000
+
 # Clustering
 cluster:
   use_silhouette: true
-  max_clusters: 8
+  max_clusters: 15
 
 # LLM provider
 llm:
   provider: auto  # auto, gemini, openai, anthropic, none
+  temperature: 0.7
 
-# Parent topic silos
-parent_topics:
-  enabled: true
-  max_topics: 10
+# Geographic targeting (v4.0)
+geo:
+  region: ae
+  locale: en-AE
+  primary_emirate: Abu Dhabi
+  bilingual: true
 
-# Validation
-validation:
-  autocomplete_enabled: true
-  max_autocomplete_checks: 100
-
-# Filtering
-filtering:
-  blacklist: [login, support, my account]
-  max_words: 6
-  min_words: 2
-
-# QA validation
-qa:
-  min_cluster_size: 3
-  max_word_count: 6
-  min_opportunity_score: 0.0
+# Output
+output:
+  format: xlsx  # json, csv, xlsx
+  include_metadata: true
 ```
 
-## 🔧 Advanced Features
+## 🔧 Advanced Features (v4.0)
+
+### Crash Recovery with Checkpoints
+Long-running pipelines automatically checkpoint to SQLite:
+```python
+from keyword_lab.checkpoint import Checkpoint, CheckpointedPipeline
+
+# Automatic checkpointing with context manager
+with CheckpointedPipeline("run_20240115_001") as cp:
+    if not cp.has_stage("scrape"):
+        data = scrape_serps(keywords)
+        cp.save_stage("scrape", data, {"urls": len(urls)})
+    else:
+        data = cp.load_stage("scrape")  # Resume from checkpoint
+
+# List and cleanup old runs
+runs = Checkpoint.list_runs()
+Checkpoint.cleanup_old_runs(keep_last=10)
+```
+
+### Abu Dhabi Entity Extraction
+Comprehensive UAE entity recognition for the contracting sector:
+```python
+from keyword_lab.entities import extract_entities
+
+entities = extract_entities("villa renovation mussafah abu dhabi", geo="ae")
+# Returns:
+# {
+#     "emirate": "Abu Dhabi",
+#     "district": "Mussafah",
+#     "is_local": True,
+#     "is_contracting": True,
+#     "location_type": "industrial",
+#     "government_entity": None,
+#     "certification": None,
+# }
+```
+
+**Supported Abu Dhabi entities:**
+- **Districts**: Mussafah, ICAD 1-3, Khalifa City, MBZ City, Al Raha, Saadiyat
+- **Free Zones**: KIZAD, Masdar, ADGM, twofour54, Hub71
+- **Government**: TAMM, ADM, ADDED, DMT, Musanada
+- **Certifications**: Estidama, Pearl Rating (1-5), PVRS, PCRS
+- **Legal Terms**: Musataha, Tawtheeq, NOC
+
+### Bilingual Arabic-English Processing
+```python
+from keyword_lab.bilingual import (
+    expand_bilingual,
+    get_arabic_equivalent,
+    analyze_bilingual_query,
+)
+
+# Get Arabic translation
+arabic = get_arabic_equivalent("renovation")  # Returns: "تجديد"
+
+# Expand keyword with bilingual variants
+variants = expand_bilingual("villa renovation abu dhabi")
+# Returns: ["villa renovation abu dhabi", "فيلا تجديد أبوظبي", ...]
+
+# Analyze query language and content
+analysis = analyze_bilingual_query("best contractor abu dhabi")
+# Returns intent, language detection, construction terms found
+```
+
+### GEO (Generative Engine Optimization)
+Optimize content for AI-powered search engines:
+```python
+from keyword_lab.geo import (
+    calculate_geo_suitability,
+    calculate_information_gain,
+    analyze_trust_signals,
+    generate_faq_schema,
+    generate_local_business_schema,
+)
+
+# Score query suitability for AI search
+score = calculate_geo_suitability("how much does villa renovation cost in abu dhabi")
+# Returns: 0.75 (high AI answer likelihood)
+
+# Calculate content uniqueness vs competitors
+gain = calculate_information_gain(your_content, competitor_contents)
+# Returns unique concepts, missing topics, recommendations
+
+# Audit E-E-A-T trust signals
+trust = analyze_trust_signals(page_content)
+# Returns experience, expertise, authority, trust scores
+
+# Generate structured data
+faq_schema = generate_faq_schema([
+    ("How much does renovation cost?", "Costs range from 50-200 AED/sqft..."),
+    ("Do I need a permit?", "Yes, ADM building permit required..."),
+])
+business_schema = generate_local_business_schema(
+    name="ABC Contracting LLC",
+    address={"addressLocality": "Abu Dhabi", "addressRegion": "Abu Dhabi"},
+    services=["Villa Renovation", "Fit Out", "MEP"],
+)
+```
+
+### Professional Excel Reports
+Generate stakeholder-ready reports with 8 analysis sheets:
+```python
+from keyword_lab.io import write_excel
+
+write_excel(
+    items=keyword_results,
+    xlsx_path="report.xlsx",
+    geo="ae",
+    report_title="ORYX Q1 Keyword Intelligence Report",
+    include_charts=True,
+    include_executive_summary=True,
+)
+```
+
+**Report Sheets:**
+1. **Executive Summary** - Key metrics, intent distribution, top clusters
+2. **Keywords** - Full data with conditional formatting (color scales)
+3. **Cluster Analysis** - Cluster performance with bar charts
+4. **Intent Breakdown** - Intent distribution with pie chart
+5. **Priority Matrix** - High-opportunity, low-difficulty keywords
+6. **GEO Analysis** - AI search optimization scores
+7. **Location Analysis** - UAE emirate breakdown
+8. **Recommendations** - Auto-generated actionable insights
 
 ### Google Autocomplete Validation
 Keywords are validated against Google's autocomplete API to confirm real search demand:
