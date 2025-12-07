@@ -37,15 +37,126 @@ GEO_INTENT_CATEGORIES = {
 }
 
 
-def _build_prompt(seed: str, audience: str, language: str, geo: str, max_results: int) -> str:
-    """Build the keyword expansion prompt."""
-    return (
+# =============================================================================
+# Locale-Specific Terminology for LLM Prompts
+# =============================================================================
+
+# UAE/Gulf-specific terminology by niche
+LOCALE_TERMINOLOGY = {
+    "ae": {
+        "general": [
+            "Include UAE-specific terms like 'DED license', 'trade license', 'free zone', 'mainland'.",
+            "Reference Dubai, Abu Dhabi, Sharjah where relevant.",
+            "Include Arabic transliterations common in UAE business (e.g., 'musataha', 'ejari').",
+        ],
+        "contracting": [
+            "Include terms: 'Civil Defense approval', 'Municipality regulations', 'NOC', 'building permit'.",
+            "Reference construction authorities: 'Dubai Municipality', 'Trakhees', 'DDA'.",
+            "Include fit-out terminology: 'MEP', 'HVAC', 'turnkey', 'BOQ'.",
+            "Add property-specific terms: 'villa renovation', 'warehouse construction', 'Musataha lease'.",
+        ],
+        "real_estate": [
+            "Include terms: 'freehold', 'leasehold', 'off-plan', 'ready property'.",
+            "Reference developers: 'Emaar', 'Nakheel', 'DAMAC', 'Aldar'.",
+            "Add area names: 'Downtown Dubai', 'Palm Jumeirah', 'Business Bay'.",
+        ],
+        "healthcare": [
+            "Include terms: 'DHA license', 'HAAD license', 'MOH approval'.",
+            "Reference: 'medical free zone', 'DHCC', 'healthcare city'.",
+        ],
+    },
+    "sa": {
+        "general": [
+            "Include Saudi-specific terms like 'Saudization', 'Nitaqat', 'commercial registration'.",
+            "Reference cities: 'Riyadh', 'Jeddah', 'Dammam', 'NEOM'.",
+            "Include Vision 2030 related terminology where relevant.",
+        ],
+        "contracting": [
+            "Include terms: 'Saudi Building Code', 'Momra', 'Baladi permit'.",
+            "Reference mega projects: 'NEOM', 'The Line', 'Red Sea Project'.",
+        ],
+    },
+}
+
+
+def _get_locale_instructions(geo: str, niche: Optional[str] = None) -> str:
+    """
+    Get locale-specific instructions for LLM prompts.
+    
+    Args:
+        geo: Geographic target (e.g., 'ae', 'sa')
+        niche: Optional niche/vertical (e.g., 'contracting', 'real_estate')
+        
+    Returns:
+        String with locale-specific instructions for the prompt
+    """
+    geo_lower = geo.lower().strip()
+    locale_terms = LOCALE_TERMINOLOGY.get(geo_lower, {})
+    
+    if not locale_terms:
+        return ""
+    
+    instructions = []
+    
+    # Add general locale terms
+    if "general" in locale_terms:
+        instructions.extend(locale_terms["general"])
+    
+    # Add niche-specific terms if available
+    if niche and niche.lower() in locale_terms:
+        instructions.extend(locale_terms[niche.lower()])
+    
+    if instructions:
+        return "\n" + "\n".join(instructions)
+    
+    return ""
+
+
+def _build_prompt(
+    seed: str,
+    audience: str,
+    language: str,
+    geo: str,
+    max_results: int,
+    niche: Optional[str] = None,
+) -> str:
+    """
+    Build the keyword expansion prompt with locale-specific instructions.
+    
+    Args:
+        seed: Seed topic for expansion
+        audience: Target audience
+        language: Language code
+        geo: Geographic target
+        max_results: Maximum keywords to generate
+        niche: Optional niche/vertical for specialized terminology
+        
+    Returns:
+        Complete prompt string
+    """
+    # Base prompt
+    base_prompt = (
         "Generate a diverse, high-quality list of long-tail SEO keywords and questions as plain text, one per line.\n"
         f"Seed topic: {seed}\nAudience: {audience}\nLanguage: {language}\nGeo: {geo}\n"
         "Rules: lowercase, bigrams/trigrams or longer, focus on search intent, include questions "
         "(who/what/why/how/best/vs/for/near me/beginner/advanced/guide/checklist/template).\n"
-        f"Return at most {max_results} items. No numbering, no extra prose."
     )
+    
+    # Add locale-specific instructions
+    locale_instructions = _get_locale_instructions(geo, niche)
+    if locale_instructions:
+        base_prompt += f"\nLocale-specific requirements:{locale_instructions}\n"
+    
+    # Add bilingual instruction for Arabic-speaking regions
+    if geo.lower() in ("ae", "sa", "qa", "kw", "bh", "om", "eg"):
+        base_prompt += (
+            "\nFor this market, include both English keywords and common Arabic transliterations "
+            "or mixed-language queries that locals use (e.g., 'شركات مقاولات دبي', 'villa renovation dubai').\n"
+        )
+    
+    base_prompt += f"Return at most {max_results} items. No numbering, no extra prose."
+    
+    return base_prompt
 
 
 def _parse_response(text: str, max_results: int) -> List[str]:
@@ -80,6 +191,7 @@ def _expand_with_litellm(
     geo: str,
     max_results: int,
     model: Optional[str] = None,
+    niche: Optional[str] = None,
 ) -> List[str]:
     """Expand keywords using LiteLLM (supports OpenAI, Anthropic, etc.)."""
     if not HAS_LITELLM:
@@ -94,7 +206,7 @@ def _expand_with_litellm(
         else:
             return []
     
-    prompt = _build_prompt(seed, audience, language, geo, max_results)
+    prompt = _build_prompt(seed, audience, language, geo, max_results, niche)
     
     try:
         response = litellm.completion(
@@ -116,6 +228,7 @@ def _expand_with_gemini(
     geo: str,
     max_results: int,
     model: Optional[str] = None,
+    niche: Optional[str] = None,
 ) -> List[str]:
     """Expand keywords using Google Gemini directly."""
     if not HAS_GENAI:
@@ -126,7 +239,7 @@ def _expand_with_gemini(
         return []
     
     model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    prompt = _build_prompt(seed, audience, language, geo, max_results)
+    prompt = _build_prompt(seed, audience, language, geo, max_results, niche)
     
     try:
         genai.configure(api_key=api_key)
@@ -147,6 +260,7 @@ def expand_with_llm(
     max_results: int = 30,
     provider: str = "auto",
     model: Optional[str] = None,
+    niche: Optional[str] = None,
 ) -> List[str]:
     """
     Expand keywords using an LLM provider.
@@ -155,10 +269,12 @@ def expand_with_llm(
         seed: Seed topic for keyword expansion
         audience: Target audience description
         language: Language code (e.g., 'en')
-        geo: Geographic target (e.g., 'global', 'us')
+        geo: Geographic target (e.g., 'global', 'us', 'ae')
         max_results: Maximum keywords to generate
         provider: LLM provider ('auto', 'gemini', 'openai', 'anthropic', 'none')
         model: Optional specific model name
+        niche: Optional niche/vertical for locale-specific terminology
+               (e.g., 'contracting', 'real_estate', 'healthcare')
         
     Returns:
         List of generated keyword strings
@@ -178,15 +294,15 @@ def expand_with_llm(
             logging.warning("LLM expansion skipped: No API keys found (GEMINI_API_KEY/OPENAI_API_KEY/ANTHROPIC_API_KEY).")
             return []
     
-    # Route to appropriate provider
+    # Route to appropriate provider (pass niche for locale-specific prompting)
     if provider == "gemini":
-        return _expand_with_gemini(seed, audience, language, geo, max_results, model)
+        return _expand_with_gemini(seed, audience, language, geo, max_results, model, niche)
     elif provider in ("openai", "anthropic"):
-        return _expand_with_litellm(seed, audience, language, geo, max_results, model)
+        return _expand_with_litellm(seed, audience, language, geo, max_results, model, niche)
     else:
         # Try LiteLLM for unknown providers
         if HAS_LITELLM:
-            return _expand_with_litellm(seed, audience, language, geo, max_results, model or provider)
+            return _expand_with_litellm(seed, audience, language, geo, max_results, model or provider, niche)
         return []
 
 
