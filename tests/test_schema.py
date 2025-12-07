@@ -12,6 +12,8 @@ def test_schema_validation():
             "funnel_stage": "MOFU",
             "search_volume": 200,
             "difficulty": 0.4,
+            "ctr_potential": 0.85,
+            "serp_features": ["top_ads", "shopping_results"],
             "estimated": True,
             "validated": True,
             "opportunity_score": 0.5,

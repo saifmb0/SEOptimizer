@@ -419,6 +419,7 @@ def opportunity_scores(
     geo: str = "global",
     niche: Optional[str] = None,
     use_ctr_adjustment: bool = True,
+    commercial_weight: float = 0.5,
 ) -> Dict[str, float]:
     """
     Calculate opportunity scores for keywords.
@@ -436,6 +437,7 @@ def opportunity_scores(
         geo: Geographic target for locale-specific scoring
         niche: Optional niche for specialized scoring
         use_ctr_adjustment: Whether to apply SERP feature CTR adjustment (default: True)
+        commercial_weight: Weight for commercial value boost (0.0-1.0, default: 0.5)
         
     Returns:
         Dict mapping keyword -> opportunity score (0.0 - 1.0)
@@ -460,8 +462,8 @@ def opportunity_scores(
         # Add commercial boost for lead-focused goals
         if prioritize_leads:
             cv = commercial_value(k, intent, geo, niche)
-            # Commercial boost adds up to 50% to the score
-            commercial_boost = cv * 0.5
+            # Commercial boost scaled by weight (default 50% boost at max)
+            commercial_boost = cv * commercial_weight
             score = base_score + (base_score * commercial_boost)
         else:
             score = base_score
