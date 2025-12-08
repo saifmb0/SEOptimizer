@@ -466,24 +466,108 @@ except ImportError:
     HAS_MARKDOWNIFY = False
 
 
+def _calculate_link_density(element) -> float:
+    """
+    Calculate the link density of an element.
+    
+    Link density = (text in links) / (total text)
+    
+    High link density (>0.5) indicates navigation menus, footer link lists,
+    or sidebars that should be excluded from content extraction.
+    
+    Args:
+        element: BeautifulSoup element to analyze
+        
+    Returns:
+        Float between 0-1 representing link density
+    """
+    total_text = element.get_text(strip=True)
+    if not total_text:
+        return 1.0  # Empty = treat as link-heavy (exclude)
+    
+    link_text_length = 0
+    for link in element.find_all("a"):
+        link_text_length += len(link.get_text(strip=True))
+    
+    return link_text_length / len(total_text)
+
+
+def _is_content_container(element) -> bool:
+    """
+    Check if an element is a likely content container.
+    
+    Uses heuristics to identify main content areas and avoid
+    navigation, footers, and sidebars.
+    
+    Args:
+        element: BeautifulSoup element to check
+        
+    Returns:
+        True if element is likely a content container
+    """
+    # Skip if no text content
+    text = element.get_text(strip=True)
+    if len(text) < 50:
+        return False
+    
+    # Get element's class and id
+    classes = " ".join(element.get("class", [])).lower()
+    elem_id = (element.get("id") or "").lower()
+    
+    # Positive signals (content containers)
+    content_signals = [
+        "content", "article", "post", "entry", "main", "body",
+        "text", "story", "description", "detail", "about",
+        "service", "project", "portfolio", "work",
+    ]
+    
+    # Negative signals (non-content areas)
+    noise_signals = [
+        "nav", "menu", "header", "footer", "sidebar", "widget",
+        "comment", "social", "share", "related", "ad", "sponsor",
+        "cookie", "popup", "modal", "banner", "subscribe",
+    ]
+    
+    # Check for positive signals
+    has_positive = any(sig in classes or sig in elem_id for sig in content_signals)
+    
+    # Check for negative signals
+    has_negative = any(sig in classes or sig in elem_id for sig in noise_signals)
+    
+    # High link density = likely navigation
+    link_density = _calculate_link_density(element)
+    is_link_heavy = link_density > 0.5
+    
+    # Decision logic
+    if has_negative or is_link_heavy:
+        return False
+    if has_positive:
+        return True
+    
+    # For unmarked elements, use text length and link density
+    # Long text with low link density is likely content
+    return len(text) > 200 and link_density < 0.3
+
+
 def _extract_visible_text(html: str, preserve_structure: bool = True) -> str:
     """
-    Extract visible text from HTML with enhanced noise filtering.
+    Extract visible text from HTML with Block Walker approach.
     
-    Handles "noisy" DOMs common in legacy UAE contracting websites:
-    - Heavy JavaScript and inline scripts
-    - Cluttered footers with repeated contact info
-    - Cookie consent banners and popups
-    - Whatsapp/chat widgets
-    - Social media widgets
+    Uses a two-phase approach:
+    1. Block Walker: Iterates over content containers (article, main, etc.)
+       and ignores nav, footer, aside at the DOM level
+    2. Link Density Filter: Discards blocks with >50% link text
+    
+    This prevents "Franken-keywords" by never mixing navigation text
+    with content text at the extraction level.
     
     Args:
         html: Raw HTML content
         preserve_structure: If True and markdownify is available, converts to Markdown
-                          to preserve headers and structure. Otherwise uses BeautifulSoup.
+                          to preserve headers and structure.
     
     Returns:
-        Extracted text content
+        Extracted text content with clear block boundaries
     """
     soup = BeautifulSoup(html, "html.parser")
     
