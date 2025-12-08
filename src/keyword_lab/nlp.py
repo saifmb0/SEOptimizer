@@ -19,6 +19,97 @@ CLEAN_RE = re.compile(r"[^\w\s]+", re.UNICODE)
 # Regex to remove digits (optional, configurable)
 DIGITS_RE = re.compile(r"\d+")
 
+# =============================================================================
+# ORYX Stop Pattern Filtering
+# =============================================================================
+# These patterns catch scraping artifacts like language toggles, navigation
+# elements, and ISO codes that should never appear in keyword output.
+
+# Pattern to detect keywords ending with ISO/navigation artifacts
+# Matches: "keyword en", "keyword ae", "keyword ar", "keyword uae"
+# Does NOT match: "contractors in uae", "companies in dubai"
+ARTIFACT_SUFFIX_PATTERN = re.compile(
+    r"^(?:.*\s)?(en|ae|ar|uae)$|"  # Ends with bare ISO code
+    r"^(en|ae|ar|uae)\s",  # Starts with bare ISO code
+    re.IGNORECASE
+)
+
+# Pattern to detect pure navigation/UI garbage
+NAVIGATION_GARBAGE_PATTERN = re.compile(
+    r"^(en|ae|ar|uae|login|sign in|sign up|register|menu|home|contact|about|"
+    r"privacy policy|terms of service|cookie|cookies|subscribe|newsletter)$|"
+    r"^(login|sign in|sign up|register)\s|"  # Starts with auth terms
+    r"\s(login|sign in|sign up|register)$|"  # Ends with auth terms
+    r"\b(en ae|ae en|ar en|uae en|en uae|ar ae)\b|"  # Language switcher combos
+    r"^(vs|for|near me|best|how|what|where|when|why|which)\s+(en|ae|ar|uae)(\s|$)|"  # Prefix + ISO
+    r"\s(en|ae|ar)\s(ae|en|ar)(\s|$)",  # Consecutive ISO codes
+    re.IGNORECASE
+)
+
+# Minimum substantive words required (excluding stopwords and artifacts)
+ARTIFACT_TOKENS = frozenset({"en", "ae", "ar", "uae", "vs", "for", "near", "me", "best", "how", "what", "where", "when", "why", "which"})
+
+
+def is_scraping_artifact(keyword: str) -> bool:
+    """
+    Detect if a keyword is a scraping artifact that should be filtered out.
+    
+    Catches:
+    - Language toggle artifacts: "en ae", "keyword ae", "ae en"
+    - Navigation elements: "login", "sign up", "menu"
+    - Franken-keywords: "vs en ae", "near me uae en"
+    
+    Args:
+        keyword: The keyword to check
+        
+    Returns:
+        True if the keyword is an artifact and should be filtered
+    """
+    kw = keyword.strip().lower()
+    
+    # Quick check for navigation garbage
+    if NAVIGATION_GARBAGE_PATTERN.search(kw):
+        return True
+    
+    # Check for artifact suffix (but allow "in uae", "in dubai" patterns)
+    if ARTIFACT_SUFFIX_PATTERN.match(kw):
+        # Allow if preceded by preposition (legitimate geo-modifier)
+        words = kw.split()
+        if len(words) >= 2 and words[-2] in {"in", "from", "to", "for", "of"}:
+            return False
+        return True
+    
+    # Check if keyword has enough substantive content
+    words = kw.split()
+    substantive_words = [w for w in words if w not in ARTIFACT_TOKENS and len(w) > 2]
+    
+    # Require at least 1 substantive word for 2-word phrases, 2 for longer
+    min_required = 1 if len(words) <= 2 else 2
+    if len(substantive_words) < min_required:
+        return True
+    
+    return False
+
+
+def filter_scraping_artifacts(keywords: List[str]) -> List[str]:
+    """
+    Filter out scraping artifacts from a list of keywords.
+    
+    Args:
+        keywords: List of keyword candidates
+        
+    Returns:
+        Filtered list with artifacts removed
+    """
+    original_count = len(keywords)
+    filtered = [kw for kw in keywords if not is_scraping_artifact(kw)]
+    removed_count = original_count - len(filtered)
+    
+    if removed_count > 0:
+        logging.info(f"Filtered {removed_count} scraping artifacts from {original_count} keywords")
+    
+    return filtered
+
 
 def clean_text(text: str, remove_digits: bool = False, language: str = "en") -> str:
     """
@@ -179,7 +270,7 @@ def generate_candidates(
         question_prefixes: Optional custom question prefixes (from config)
         
     Returns:
-        List of candidate keywords
+        List of candidate keywords (filtered for scraping artifacts)
     """
     cleaned_docs = [clean_text(d.get("text", "")) for d in docs]
     cleaned_docs = [t for t in cleaned_docs if t]
@@ -189,4 +280,8 @@ def generate_candidates(
     tfidf_terms = tfidf_top_terms_per_doc(cleaned_docs, top_k=top_terms_per_doc)
     cands = list(dict.fromkeys([*ngram_list, *questions, *tfidf_terms]))
     cands = [c.strip().lower() for c in cands if len(c.split()) >= 2]
+    
+    # ORYX: Filter out scraping artifacts (language toggles, navigation, ISO codes)
+    cands = filter_scraping_artifacts(cands)
+    
     return cands
