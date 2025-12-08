@@ -84,16 +84,16 @@ cd oryx-engine
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[all]"
+```
 Usage
 Basic Execution
 Run the pipeline with the default configuration.
-```
+
 ```Bash
-
 oryx run --seed-topic "turnkey villa construction" --geo ae
-Market-Specific Presets
 ```
 
+Market-Specific Presets
 Load specialized configurations for specific verticals. The following example targets the Abu Dhabi contracting sector:
 ```Bash
 
