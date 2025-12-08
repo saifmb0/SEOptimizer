@@ -10,6 +10,89 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 # Import multilingual stopwords
 from .stopwords import get_stopwords, EN_STOPWORDS, AR_STOPWORDS
 
+# =============================================================================
+# Sentence Tokenization (Strict Boundary Detection)
+# =============================================================================
+# Use NLTK's sentence tokenizer to prevent merging of unrelated content.
+# Falls back to simple splitting if NLTK punkt is unavailable.
+
+try:
+    import nltk
+    # Try to use punkt tokenizer
+    try:
+        nltk.data.find('tokenizers/punkt')
+        HAS_NLTK_PUNKT = True
+    except LookupError:
+        # Try to download punkt
+        try:
+            nltk.download('punkt', quiet=True)
+            nltk.download('punkt_tab', quiet=True)
+            HAS_NLTK_PUNKT = True
+        except Exception:
+            HAS_NLTK_PUNKT = False
+    
+    if HAS_NLTK_PUNKT:
+        from nltk.tokenize import sent_tokenize as _nltk_sent_tokenize
+except ImportError:
+    HAS_NLTK_PUNKT = False
+    _nltk_sent_tokenize = None
+
+
+def sent_tokenize(text: str, language: str = "en") -> List[str]:
+    """
+    Tokenize text into sentences with strict boundary detection.
+    
+    Uses NLTK's punkt tokenizer for proper sentence boundary detection.
+    This ensures "Contact Us" and "Privacy Policy" never merge with
+    content paragraphs.
+    
+    Falls back to newline + punctuation splitting if NLTK is unavailable.
+    
+    Args:
+        text: Text to segment into sentences
+        language: Language code ('en', 'ar', etc.)
+        
+    Returns:
+        List of sentences
+    """
+    if not text or not text.strip():
+        return []
+    
+    # First, respect explicit newlines as hard boundaries
+    # (inserted by scrape.py between block elements)
+    lines = text.split('\n')
+    
+    sentences = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        
+        # Use NLTK for sentence tokenization within lines
+        if HAS_NLTK_PUNKT and _nltk_sent_tokenize:
+            try:
+                # Map language codes to NLTK language names
+                nltk_lang_map = {
+                    'en': 'english',
+                    'ar': 'english',  # Arabic uses English tokenizer (best available)
+                    'de': 'german',
+                    'es': 'spanish',
+                    'fr': 'french',
+                }
+                nltk_lang = nltk_lang_map.get(language, 'english')
+                line_sents = _nltk_sent_tokenize(line, language=nltk_lang)
+                sentences.extend(line_sents)
+            except Exception:
+                # Fallback on any error
+                sentences.append(line)
+        else:
+            # Fallback: split on sentence-ending punctuation
+            # This is less accurate but better than nothing
+            fallback_sents = re.split(r'(?<=[.!?])\s+', line)
+            sentences.extend([s.strip() for s in fallback_sents if s.strip()])
+    
+    return sentences
+
 
 # Unicode-aware text cleaning regex
 # Supports Arabic script, Latin characters, and other Unicode letters
@@ -361,54 +444,58 @@ def generate_candidates(
     ngram_min_df: int = 2, 
     top_terms_per_doc: int = 10,
     question_prefixes: Optional[List[str]] = None,
+    language: str = "en",
 ) -> List[str]:
     """
-    Generate keyword candidates by processing documents line-by-line.
+    Generate keyword candidates with strict sentence boundary detection.
     
-    This prevents footer/nav merging artifacts by respecting the newline
-    boundaries that scrape.py inserts between block elements.
+    Uses NLTK sentence tokenization to ensure proper boundaries:
+    - "Contact Us" never merges with content paragraphs
+    - Footer links stay isolated from main content
+    - Navigation elements don't contaminate keywords
     
-    The key insight: n-grams should NEVER cross line boundaries because
-    scrape.py uses newlines to separate unrelated content blocks.
+    The key insight: n-grams should NEVER cross sentence/line boundaries.
     
     Args:
         docs: List of document dicts with 'text' field
         ngram_min_df: Minimum document frequency for ngrams
         top_terms_per_doc: Number of top TF-IDF terms per document
         question_prefixes: Optional custom question prefixes (from config)
+        language: Language code for sentence tokenization
         
     Returns:
         List of candidate keywords (filtered for scraping artifacts)
     """
     # ==========================================================================
-    # Step 1: Split docs into lines FIRST to preserve boundaries
+    # Step 1: Sentence Tokenization with Strict Boundaries
     # ==========================================================================
-    # This is the critical fix: by splitting on \n BEFORE cleaning,
-    # we prevent n-grams from crossing the boundary between unrelated
-    # content blocks (e.g., footer links merging with copyright text)
+    # Use NLTK sent_tokenize for proper sentence boundary detection.
+    # This prevents merging of navigation elements with content.
     
-    all_lines = []
+    all_sentences = []
     for d in docs:
         raw_text = d.get("text", "")
-        # Split by newline to respect the structure scrape.py created
-        lines = raw_text.split('\n')
-        for line in lines:
+        
+        # Use sentence tokenizer (respects newlines as hard boundaries)
+        sentences = sent_tokenize(raw_text, language=language)
+        
+        for sentence in sentences:
             # Skip short navigation noise (e.g., "Home", "About", "Login")
             # Require at least 3 words to be a meaningful content line
-            if len(line.split()) < 3:
+            if len(sentence.split()) < 3:
                 continue
-            cleaned = clean_text(line)
+            cleaned = clean_text(sentence)
             if cleaned and len(cleaned.split()) >= 2:
-                all_lines.append(cleaned)
+                all_sentences.append(cleaned)
     
     # ==========================================================================
-    # Step 2: Pass lines (not whole docs) to vectorizer
+    # Step 2: Pass sentences (not whole docs) to vectorizer
     # ==========================================================================
-    # CountVectorizer now sees each line as a separate "document"
+    # CountVectorizer now sees each sentence as a separate "document"
     # This prevents n-grams like "owners developers facility" from forming
-    # when those words came from different footer sections
+    # when those words came from different sections
     
-    counts_df = ngram_counts(all_lines, min_df=ngram_min_df)
+    counts_df = ngram_counts(all_sentences, min_df=ngram_min_df)
     ngram_list = counts_df["ngram"].tolist()
     
     # ==========================================================================
@@ -427,17 +514,18 @@ def generate_candidates(
         )
     
     # ==========================================================================
-    # Step 4: TF-IDF on reconstructed docs
+    # Step 4: TF-IDF on reconstructed docs with sentence boundaries
     # ==========================================================================
-    # Reassemble cleaned lines per doc for TF-IDF context
-    # This preserves document-level importance while respecting line boundaries
+    # Reassemble cleaned sentences per doc for TF-IDF context
+    # This preserves document-level importance while respecting boundaries
     
     reconstructed_docs = []
     for d in docs:
-        raw_lines = d.get("text", "").split('\n')
-        clean_lines = [clean_text(l) for l in raw_lines if len(l.split()) >= 3]
-        if clean_lines:
-            reconstructed_docs.append(" ".join(clean_lines))
+        raw_text = d.get("text", "")
+        sentences = sent_tokenize(raw_text, language=language)
+        clean_sents = [clean_text(s) for s in sentences if len(s.split()) >= 3]
+        if clean_sents:
+            reconstructed_docs.append(" ".join(clean_sents))
     
     tfidf_terms = tfidf_top_terms_per_doc(reconstructed_docs, top_k=top_terms_per_doc)
     
