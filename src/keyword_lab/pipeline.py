@@ -12,7 +12,7 @@ from .cluster import cluster_keywords, infer_intent
 from .metrics import compute_metrics, opportunity_scores
 from .schema import validate_items
 from .io import write_output
-from .llm import expand_with_llm, assign_parent_topics
+from .llm import expand_with_llm, assign_parent_topics, verify_candidates_with_llm
 from .config import load_config, get_intent_rules, get_question_prefixes, config_to_dict
 
 
@@ -224,6 +224,24 @@ def run_pipeline(
             model=llm_cfg.get("model"),
             max_topics=int(parent_topic_cfg.get("max_topics", 10)),
         )
+
+    # LLM Verification Gate: Filter hallucinated/nonsensical keywords
+    # This catches "Franken-keywords" that passed earlier heuristic filters
+    if llm_cfg.get("verify", False) and not dry_run:
+        logging.info("Running LLM hallucination verification...")
+        # Get top candidates by opportunity score to limit API costs
+        top_candidates = sorted(candidates, key=lambda k: opp.get(k, 0), reverse=True)[:200]
+        validity_map = verify_candidates_with_llm(
+            top_candidates,
+            provider=llm_cfg.get("provider", "auto"),
+            model=llm_cfg.get("model"),
+        )
+        # Filter candidates - keep only those that passed LLM verification
+        candidates_before = len(candidates)
+        candidates = [c for c in candidates if validity_map.get(c, True)]
+        filtered = candidates_before - len(candidates)
+        if filtered > 0:
+            logging.info(f"LLM verification: Removed {filtered} hallucinated keywords")
 
     # Assemble per cluster, prioritize opportunity score within clusters
     items: List[Dict] = []
