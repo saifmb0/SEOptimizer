@@ -25,6 +25,7 @@ try:
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
+    openpyxl = None  # <--- FIX 1: Define placeholder to prevent NameError
 
 
 # =============================================================================
@@ -87,24 +88,6 @@ def write_excel(
 ) -> None:
     """
     Write results to a professional ORYX-styled Excel workbook.
-    
-    Creates sheets:
-    - 'Executive Summary': High-level overview with key metrics
-    - 'Keywords': All keywords with conditional formatting
-    - 'Cluster Analysis': Cluster performance with charts
-    - 'Intent Breakdown': Search intent analysis
-    - 'Priority Matrix': High-opportunity keywords for action
-    - 'GEO Analysis': AI search optimization scores
-    - 'Location Analysis': Geographic breakdown (UAE)
-    - 'Recommendations': Actionable insights
-    
-    Args:
-        items: List of keyword result dictionaries
-        xlsx_path: Path to output .xlsx file
-        geo: Geographic target (enables location analysis for 'ae')
-        report_title: Title for the report
-        include_charts: Whether to include charts
-        include_executive_summary: Whether to include executive summary
     """
     if not xlsx_path:
         return
@@ -163,7 +146,7 @@ def write_excel(
 
 
 def _create_executive_summary(
-    workbook: openpyxl.Workbook, 
+    workbook: "openpyxl.Workbook",  # <--- FIX 2: Quoted type hint
     df: pd.DataFrame,
     report_title: str,
     geo: str,
@@ -230,7 +213,7 @@ def _create_executive_summary(
     sheet.column_dimensions['C'].width = 15
 
 
-def _create_keywords_sheet(workbook: openpyxl.Workbook, df: pd.DataFrame) -> None:
+def _create_keywords_sheet(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
     """Create main keywords data sheet with conditional formatting."""
     sheet = workbook.create_sheet("Keywords")
     
@@ -285,7 +268,7 @@ def _create_keywords_sheet(workbook: openpyxl.Workbook, df: pd.DataFrame) -> Non
 
 
 def _create_cluster_analysis(
-    workbook: openpyxl.Workbook, 
+    workbook: "openpyxl.Workbook", 
     df: pd.DataFrame,
     include_charts: bool,
 ) -> None:
@@ -339,7 +322,7 @@ def _create_cluster_analysis(
 
 
 def _create_intent_analysis(
-    workbook: openpyxl.Workbook,
+    workbook: "openpyxl.Workbook",
     df: pd.DataFrame,
     include_charts: bool,
 ) -> None:
@@ -385,7 +368,7 @@ def _create_intent_analysis(
     _auto_fit_columns(sheet)
 
 
-def _create_priority_matrix(workbook: openpyxl.Workbook, df: pd.DataFrame) -> None:
+def _create_priority_matrix(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
     """Create priority matrix of high-opportunity, low-difficulty keywords."""
     sheet = workbook.create_sheet("Priority Matrix")
     
@@ -421,7 +404,7 @@ def _create_priority_matrix(workbook: openpyxl.Workbook, df: pd.DataFrame) -> No
     _auto_fit_columns(sheet)
 
 
-def _create_geo_analysis(workbook: openpyxl.Workbook, df: pd.DataFrame) -> None:
+def _create_geo_analysis(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
     """Create GEO (Generative Engine Optimization) analysis sheet."""
     # Check for GEO-related columns
     geo_cols = ['geo_suitability', 'info_gain_score', 'geo_query_type']
@@ -451,7 +434,7 @@ def _create_geo_analysis(workbook: openpyxl.Workbook, df: pd.DataFrame) -> None:
     _auto_fit_columns(sheet)
 
 
-def _create_location_analysis(workbook: openpyxl.Workbook, df: pd.DataFrame) -> None:
+def _create_location_analysis(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
     """Create UAE location analysis sheet."""
     sheet = workbook.create_sheet("Location Analysis")
     
@@ -506,7 +489,7 @@ def _create_location_analysis(workbook: openpyxl.Workbook, df: pd.DataFrame) -> 
 
 
 def _create_recommendations(
-    workbook: openpyxl.Workbook, 
+    workbook: "openpyxl.Workbook", 
     df: pd.DataFrame,
     geo: str,
 ) -> None:
@@ -615,15 +598,6 @@ def write_output(
 ) -> None:
     """
     Write output in the appropriate format based on file extension.
-    
-    Supports: .json, .csv, .xlsx
-    
-    Args:
-        items: List of keyword result dictionaries
-        output_path: Path to output file (or '-' for stdout)
-        save_csv: Optional additional CSV path
-        geo: Geographic target for Excel reports
-        report_title: Title for Excel reports
     """
     if output_path == "-":
         write_json(items, output_path)
