@@ -94,6 +94,247 @@ def sent_tokenize(text: str, language: str = "en") -> List[str]:
     return sentences
 
 
+# =============================================================================
+# SpaCy Integration for Grammatical Validation (Week 2)
+# =============================================================================
+# Uses SpaCy for Part-of-Speech tagging and Named Entity Recognition
+# to filter out grammatically invalid or nonsensical keywords.
+
+try:
+    import spacy
+    try:
+        _nlp_spacy = spacy.load("en_core_web_sm", disable=["parser", "ner"])
+        HAS_SPACY = True
+    except OSError:
+        # Model not installed
+        HAS_SPACY = False
+        _nlp_spacy = None
+except ImportError:
+    HAS_SPACY = False
+    _nlp_spacy = None
+
+
+# POS tags that should not start a keyword phrase
+INVALID_START_POS = frozenset({
+    "CC",    # Conjunction (and, or, but)
+    "IN",    # Preposition (in, on, at, for, with) - unless idiom
+    "DT",    # Determiner (the, a, an)
+    "TO",    # "to" as particle
+    "EX",    # Existential there
+    "WDT",   # Wh-determiner (which, that)
+    "WP",    # Wh-pronoun (who, what)
+    "WP$",   # Possessive wh-pronoun
+    "WRB",   # Wh-adverb (where, when, why, how) - OK at start actually
+})
+
+# Exceptions: These starting words are OK even if POS says otherwise
+VALID_START_EXCEPTIONS = frozenset({
+    "how", "what", "where", "when", "why", "which", "who",  # Question words
+    "best", "top",  # Comparison words (NOT "vs" - it needs following content)
+    "for",  # "for beginners", "for professionals"
+})
+
+# Words that must be followed by meaningful content (not just geo codes)
+REQUIRES_CONTENT_AFTER = frozenset({
+    "vs", "versus", "or", "and",
+})
+
+# Maximum noun-only sequence length before rejection
+MAX_NOUN_CLUSTER_SIZE = 3
+
+# Minimum meaningful words (non-stopwords, non-geo) for phrases starting with certain words
+MIN_MEANINGFUL_WORDS_FOR_VS = 2  # "vs" needs at least 2 meaningful words after it
+GEO_TOKENS = frozenset({"uae", "dubai", "abu", "dhabi", "sharjah", "ae", "en", "ar", "ajman", "fujairah"})
+
+# Common stopwords that don't count as meaningful
+COMMON_STOPWORDS = frozenset({"the", "a", "an", "is", "are", "was", "were", "be", "been", "being"})
+
+
+def is_grammatically_valid(keyword: str) -> bool:
+    """
+    Check if a keyword phrase is grammatically valid.
+    
+    Uses SpaCy POS tagging to filter out nonsensical combinations:
+    - Rejects keywords starting with conjunctions (and, or, but)
+    - Rejects keywords starting with prepositions (unless idiom)
+    - Rejects pure noun clusters with >3 nouns (Franken-keywords)
+    
+    Args:
+        keyword: The keyword phrase to validate
+        
+    Returns:
+        True if grammatically valid, False otherwise
+    """
+    if not HAS_SPACY or not _nlp_spacy:
+        # If SpaCy not available, allow all (graceful degradation)
+        return True
+    
+    keyword = keyword.strip().lower()
+    if not keyword or len(keyword.split()) < 2:
+        return True  # Single words pass through
+    
+    # Check for valid start exceptions first
+    first_word = keyword.split()[0]
+    if first_word in VALID_START_EXCEPTIONS:
+        return True
+    
+    # =================================================================
+    # Rule 0: Check for words that require meaningful content after
+    # =================================================================
+    # "vs managers uae" -> "vs" needs real content, not just 1 word + geo
+    if first_word in REQUIRES_CONTENT_AFTER:
+        words = keyword.split()
+        meaningful_words = [w for w in words[1:] if w not in GEO_TOKENS and w not in COMMON_STOPWORDS and len(w) > 2]
+        # "vs" needs at least 2 meaningful words to form a valid comparison
+        if len(meaningful_words) < MIN_MEANINGFUL_WORDS_FOR_VS:
+            logging.debug(f"Grammar filter: '{keyword}' - '{first_word}' needs {MIN_MEANINGFUL_WORDS_FOR_VS}+ meaningful words, got {len(meaningful_words)}")
+            return False
+    
+    # Process with SpaCy
+    try:
+        doc = _nlp_spacy(keyword)
+        
+        if len(doc) == 0:
+            return True
+        
+        # =================================================================
+        # Rule 1: Check starting POS
+        # =================================================================
+        first_token = doc[0]
+        if first_token.pos_ in {"CCONJ", "SCONJ"}:  # Conjunctions
+            logging.debug(f"Grammar filter: '{keyword}' starts with conjunction")
+            return False
+        
+        # Check for invalid starting tag (more granular)
+        if first_token.tag_ in INVALID_START_POS and first_token.text not in VALID_START_EXCEPTIONS:
+            # Allow "vs" and similar if they have meaningful content (checked above)
+            if first_token.text not in REQUIRES_CONTENT_AFTER:
+                logging.debug(f"Grammar filter: '{keyword}' starts with {first_token.tag_}")
+                return False
+        
+        # =================================================================
+        # Rule 2: Check for noun clusters (Franken-keywords)
+        # =================================================================
+        # Count nouns more aggressively - SpaCy sometimes mistags
+        noun_count = 0
+        noun_tags = {"NN", "NNS", "NNP", "NNPS"}
+        
+        for token in doc:
+            # Count as noun if POS is NOUN/PROPN OR if tag is noun-like
+            # This catches cases where SpaCy mistags (e.g., "facility" as VERB)
+            if token.pos_ in {"NOUN", "PROPN"} or token.tag_ in noun_tags:
+                noun_count += 1
+            # Also count words that LOOK like nouns (lowercase, >3 chars, no special chars)
+            elif token.text.islower() and len(token.text) > 3 and token.text.isalpha():
+                # Check if it could be a noun (not clearly a verb/adj)
+                if token.pos_ not in {"VERB", "ADJ", "ADV", "ADP", "DET", "PRON"}:
+                    noun_count += 1
+        
+        # If phrase has >3 noun-like words and no clear structure, reject
+        has_verb = any(t.pos_ == "VERB" and t.text not in {"be", "is", "are"} for t in doc)
+        has_adj = any(t.pos_ == "ADJ" for t in doc)
+        has_adp = any(t.pos_ == "ADP" and t.text in {"in", "for", "to", "of", "with"} for t in doc)
+        
+        # Pure noun cluster with >3 nouns and no modifiers = Franken-keyword
+        if noun_count > MAX_NOUN_CLUSTER_SIZE and not (has_verb or has_adj or has_adp):
+            # Exception: phrases starting with comparison words are OK
+            if first_word not in {"vs", "versus", "best", "top", "compare"}:
+                logging.debug(f"Grammar filter: '{keyword}' is a noun cluster ({noun_count} noun-like words)")
+                return False
+        
+        # Also reject if ALL words are potentially nouns (no structure at all)
+        # But only if phrase doesn't start with a known pattern word
+        pattern_starters = {"vs", "versus", "best", "top", "compare", "how", "what", "where", "for"}
+        total_content_words = sum(1 for t in doc if not t.is_space and not t.is_punct)
+        if total_content_words > 3 and noun_count >= total_content_words - 1:
+            # Almost all words are nouns - likely Franken-keyword
+            if not (has_verb or has_adj or has_adp) and first_word not in pattern_starters:
+                logging.debug(f"Grammar filter: '{keyword}' has {noun_count}/{total_content_words} noun-like words")
+                return False
+        
+        return True
+        
+    except Exception as e:
+        logging.debug(f"SpaCy error on '{keyword}': {e}")
+        return True  # On error, allow the keyword
+
+
+def has_conflicting_entities(keyword: str) -> bool:
+    """
+    Check if a keyword contains conflicting Named Entities.
+    
+    Rejects keywords that mix incompatible geographic entities:
+    - "Dubai Abu Dhabi" (two cities in one phrase without connector)
+    - "UAE Saudi Arabia" (two countries)
+    
+    Allows:
+    - "Dubai to Abu Dhabi" (connector present)
+    - "Dubai vs Abu Dhabi" (comparison)
+    
+    Args:
+        keyword: The keyword phrase to check
+        
+    Returns:
+        True if entities conflict, False otherwise
+    """
+    if not HAS_SPACY or not _nlp_spacy:
+        return False
+    
+    # Connectors that make multi-entity phrases valid
+    valid_connectors = {"to", "vs", "versus", "or", "and", "from"}
+    
+    # UAE city/emirate names
+    uae_cities = {"dubai", "abu dhabi", "sharjah", "ajman", "fujairah", 
+                  "ras al khaimah", "umm al quwain", "al ain"}
+    
+    keyword_lower = keyword.lower()
+    
+    # Quick check: how many UAE cities are mentioned?
+    cities_found = [city for city in uae_cities if city in keyword_lower]
+    
+    if len(cities_found) > 1:
+        # Check if a connector is present
+        has_connector = any(f" {conn} " in keyword_lower for conn in valid_connectors)
+        if not has_connector:
+            logging.debug(f"Entity conflict: '{keyword}' has multiple cities without connector")
+            return True
+    
+    return False
+
+
+def filter_grammatically_invalid(keywords: List[str]) -> List[str]:
+    """
+    Filter out grammatically invalid keywords.
+    
+    Applies SpaCy-based grammar rules:
+    - POS filtering (no starting conjunctions/prepositions)
+    - Noun cluster detection (max 3 consecutive nouns)
+    - Entity cohesion check (no conflicting geo entities)
+    
+    Args:
+        keywords: List of keyword candidates
+        
+    Returns:
+        Filtered list with invalid keywords removed
+    """
+    if not HAS_SPACY:
+        logging.debug("SpaCy not available - skipping grammar validation")
+        return keywords
+    
+    original_count = len(keywords)
+    
+    filtered = []
+    for kw in keywords:
+        if is_grammatically_valid(kw) and not has_conflicting_entities(kw):
+            filtered.append(kw)
+    
+    removed_count = original_count - len(filtered)
+    if removed_count > 0:
+        logging.info(f"Grammar filter: Removed {removed_count} invalid keywords")
+    
+    return filtered
+
+
 # Unicode-aware text cleaning regex
 # Supports Arabic script, Latin characters, and other Unicode letters
 # \w with re.UNICODE matches Unicode word characters (letters, digits, underscore)
@@ -535,7 +776,13 @@ def generate_candidates(
     cands = list(dict.fromkeys([*ngram_list, *questions, *tfidf_terms]))
     cands = [c.strip().lower() for c in cands if len(c.split()) >= 2]
     
-    # Final artifact filter
+    # Filter scraping artifacts
     cands = filter_scraping_artifacts(cands)
+    
+    # ==========================================================================
+    # Step 6: Grammatical Validation (Week 2 - Grammar Police)
+    # ==========================================================================
+    # Apply SpaCy-based grammar rules to filter nonsensical keywords
+    cands = filter_grammatically_invalid(cands)
     
     return cands
