@@ -673,6 +673,32 @@ def _extract_visible_text(html: str, preserve_structure: bool = True) -> str:
             el.insert_after(NavigableString(" | "))
     
     # ==========================================================================
+    # Phase 3.6: Link Density Filter (Visual Density Heuristic)
+    # ==========================================================================
+    # Discard entire blocks with >50% link text BEFORE they reach NLP.
+    # This catches mega-menus, footer link lists, and sidebar nav that
+    # might have escaped pattern-based filtering.
+    
+    LINK_DENSITY_THRESHOLD = 0.5  # 50% links = likely navigation
+    
+    for container in soup.find_all(["div", "section", "ul", "ol"]):
+        # Only check substantial blocks (>20 chars)
+        text_content = container.get_text(strip=True)
+        if len(text_content) < 20:
+            continue
+        
+        # Calculate link density for this block
+        link_density = _calculate_link_density(container)
+        
+        if link_density > LINK_DENSITY_THRESHOLD:
+            # Log for debugging in verbose mode
+            logging.debug(
+                f"Discarding link-heavy block ({link_density:.0%} links): "
+                f"{text_content[:50]}..."
+            )
+            container.decompose()
+    
+    # ==========================================================================
     # Phase 4: Extract content with structure preservation
     # ==========================================================================
     
