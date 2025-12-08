@@ -1,9 +1,241 @@
 import logging
 import math
 from typing import Dict, List, Tuple, Optional, Set
+from collections import Counter
 
 import numpy as np
 from scipy import stats
+
+
+# =============================================================================
+# Perplexity / Naturalness Scoring (Week 4)
+# =============================================================================
+# Uses sentence-transformers to score how "natural" a keyword phrase sounds.
+# Low perplexity = natural phrase, High perplexity = nonsense/artifact
+
+try:
+    from sentence_transformers import SentenceTransformer, util
+    HAS_SENTENCE_TRANSFORMERS = True
+    # Lazy load the model
+    _perplexity_model = None
+except ImportError:
+    HAS_SENTENCE_TRANSFORMERS = False
+    _perplexity_model = None
+
+
+def _get_perplexity_model():
+    """Lazy load the sentence transformer model."""
+    global _perplexity_model
+    if _perplexity_model is None and HAS_SENTENCE_TRANSFORMERS:
+        try:
+            _perplexity_model = SentenceTransformer('all-MiniLM-L6-v2')
+            logging.debug("Loaded sentence-transformers model for perplexity scoring")
+        except Exception as e:
+            logging.warning(f"Failed to load sentence-transformers model: {e}")
+    return _perplexity_model
+
+
+# Reference phrases for naturalness comparison
+NATURAL_REFERENCE_PHRASES = [
+    "best contractors in dubai",
+    "villa renovation cost",
+    "how to hire a contractor",
+    "construction company near me",
+    "warehouse building services",
+    "professional renovation services",
+    "where to find contractors",
+    "commercial construction dubai",
+]
+
+# Clearly unnatural/garbage phrases for comparison
+UNNATURAL_REFERENCE_PHRASES = [
+    "template owners developers facility",
+    "en ae ar login menu",
+    "cookie privacy terms login",
+    "vs or and the for",
+    "home about contact menu footer",
+]
+
+
+def calculate_naturalness_score(keyword: str) -> float:
+    """
+    Calculate how "natural" a keyword phrase sounds using embeddings.
+    
+    Uses sentence-transformers to compute similarity to natural vs unnatural
+    reference phrases. Higher score = more natural.
+    
+    Args:
+        keyword: The keyword to score
+        
+    Returns:
+        Float between 0-1 where 1 = highly natural, 0 = nonsense
+    """
+    model = _get_perplexity_model()
+    if model is None:
+        return 0.5  # Default to neutral if model unavailable
+    
+    try:
+        # Encode the keyword
+        kw_embedding = model.encode(keyword, convert_to_tensor=True)
+        
+        # Encode reference phrases
+        natural_embeddings = model.encode(NATURAL_REFERENCE_PHRASES, convert_to_tensor=True)
+        unnatural_embeddings = model.encode(UNNATURAL_REFERENCE_PHRASES, convert_to_tensor=True)
+        
+        # Calculate similarity to natural phrases
+        natural_sims = util.cos_sim(kw_embedding, natural_embeddings)[0]
+        avg_natural_sim = float(natural_sims.mean())
+        
+        # Calculate similarity to unnatural phrases
+        unnatural_sims = util.cos_sim(kw_embedding, unnatural_embeddings)[0]
+        avg_unnatural_sim = float(unnatural_sims.mean())
+        
+        # Score = natural_sim - unnatural_sim, normalized to 0-1
+        # If more similar to natural, score is high
+        raw_score = (avg_natural_sim - avg_unnatural_sim + 1) / 2
+        
+        return max(0.0, min(1.0, raw_score))
+        
+    except Exception as e:
+        logging.debug(f"Naturalness scoring error for '{keyword}': {e}")
+        return 0.5
+
+
+def batch_naturalness_scores(keywords: List[str]) -> Dict[str, float]:
+    """
+    Calculate naturalness scores for a batch of keywords.
+    
+    More efficient than calling calculate_naturalness_score repeatedly.
+    
+    Args:
+        keywords: List of keywords to score
+        
+    Returns:
+        Dict mapping keyword to naturalness score
+    """
+    if not keywords:
+        return {}
+    
+    model = _get_perplexity_model()
+    if model is None:
+        return {kw: 0.5 for kw in keywords}
+    
+    try:
+        # Encode all at once for efficiency
+        kw_embeddings = model.encode(keywords, convert_to_tensor=True)
+        natural_embeddings = model.encode(NATURAL_REFERENCE_PHRASES, convert_to_tensor=True)
+        unnatural_embeddings = model.encode(UNNATURAL_REFERENCE_PHRASES, convert_to_tensor=True)
+        
+        scores = {}
+        for i, kw in enumerate(keywords):
+            natural_sims = util.cos_sim(kw_embeddings[i], natural_embeddings)[0]
+            unnatural_sims = util.cos_sim(kw_embeddings[i], unnatural_embeddings)[0]
+            
+            raw_score = (float(natural_sims.mean()) - float(unnatural_sims.mean()) + 1) / 2
+            scores[kw] = max(0.0, min(1.0, raw_score))
+        
+        return scores
+        
+    except Exception as e:
+        logging.debug(f"Batch naturalness scoring error: {e}")
+        return {kw: 0.5 for kw in keywords}
+
+
+# =============================================================================
+# Universal Term Penalty (Week 4)
+# =============================================================================
+# Detect terms that appear in >80% of documents (navigation, boilerplate)
+# and penalize keywords containing them.
+
+# Default universal terms (common boilerplate)
+DEFAULT_UNIVERSAL_TERMS = frozenset({
+    "login", "sign in", "sign up", "register", "password",
+    "cookie", "cookies", "privacy", "privacy policy", "terms",
+    "terms of service", "copyright", "all rights reserved",
+    "home", "about", "contact", "menu", "footer", "header",
+    "subscribe", "newsletter", "follow us", "share",
+})
+
+
+def detect_universal_terms(
+    documents: List[str],
+    threshold: float = 0.8,
+    min_doc_count: int = 3,
+) -> Set[str]:
+    """
+    Detect terms that appear in a high percentage of documents.
+    
+    Terms appearing in >threshold% of documents are likely navigation,
+    boilerplate, or other non-distinctive content.
+    
+    Args:
+        documents: List of document texts
+        threshold: Minimum document frequency to be considered universal
+        min_doc_count: Minimum documents required for meaningful analysis
+        
+    Returns:
+        Set of universal terms
+    """
+    if len(documents) < min_doc_count:
+        return DEFAULT_UNIVERSAL_TERMS
+    
+    # Tokenize and count document frequency
+    term_doc_counts: Counter = Counter()
+    
+    for doc in documents:
+        # Get unique terms in this document
+        doc_terms = set(doc.lower().split())
+        for term in doc_terms:
+            term_doc_counts[term] += 1
+    
+    # Find terms appearing in >threshold% of documents
+    universal = set()
+    for term, count in term_doc_counts.items():
+        doc_freq = count / len(documents)
+        if doc_freq >= threshold:
+            universal.add(term)
+    
+    # Add default universal terms
+    universal.update(DEFAULT_UNIVERSAL_TERMS)
+    
+    logging.debug(f"Detected {len(universal)} universal terms (threshold={threshold})")
+    return universal
+
+
+def calculate_universal_term_penalty(
+    keyword: str,
+    universal_terms: Set[str],
+    penalty_per_term: float = 0.3,
+    max_penalty: float = 0.9,
+) -> float:
+    """
+    Calculate penalty for keywords containing universal terms.
+    
+    Keywords with navigation/boilerplate terms get penalized
+    to reduce their opportunity score.
+    
+    Args:
+        keyword: The keyword to check
+        universal_terms: Set of universal terms to check against
+        penalty_per_term: Penalty for each universal term found
+        max_penalty: Maximum total penalty (cap)
+        
+    Returns:
+        Float between 0-max_penalty representing the penalty
+    """
+    kw_tokens = set(keyword.lower().split())
+    
+    # Count how many universal terms are in the keyword
+    universal_count = len(kw_tokens & universal_terms)
+    
+    if universal_count == 0:
+        return 0.0
+    
+    # Calculate penalty (capped at max_penalty)
+    penalty = min(universal_count * penalty_per_term, max_penalty)
+    
+    logging.debug(f"Universal term penalty for '{keyword}': {penalty:.2f} ({universal_count} terms)")
+    return penalty
 
 
 # =============================================================================
@@ -462,15 +694,18 @@ def opportunity_scores(
     niche: Optional[str] = None,
     use_ctr_adjustment: bool = True,
     commercial_weight: float = 0.5,
+    documents: Optional[List[str]] = None,
+    use_naturalness: bool = True,
+    use_universal_penalty: bool = True,
 ) -> Dict[str, float]:
     """
-    Calculate opportunity scores for keywords.
+    Calculate opportunity scores for keywords with quality filtering.
     
-    Formula: search_volume * ctr_potential * (1 - difficulty) * (business_relevance + commercial_boost)
+    Formula: (search_volume * ctr * (1 - difficulty) * relevance) * naturalness - universal_penalty
     
-    CTR potential accounts for SERP features that reduce organic click-through.
-    For lead-generation goals, commercial_value provides additional boost
-    to high-value transactional keywords.
+    Week 4 additions:
+    - Naturalness scoring via sentence-transformers (penalizes nonsense)
+    - Universal term penalty (penalizes boilerplate/navigation terms)
     
     Args:
         metrics: Dict of keyword -> metrics dict
@@ -478,8 +713,11 @@ def opportunity_scores(
         goals: Business goals string ('traffic', 'leads', etc.)
         geo: Geographic target for locale-specific scoring
         niche: Optional niche for specialized scoring
-        use_ctr_adjustment: Whether to apply SERP feature CTR adjustment (default: True)
-        commercial_weight: Weight for commercial value boost (0.0-1.0, default: 0.5)
+        use_ctr_adjustment: Whether to apply SERP feature CTR adjustment
+        commercial_weight: Weight for commercial value boost (0.0-1.0)
+        documents: Optional documents for detecting universal terms
+        use_naturalness: Whether to apply naturalness scoring
+        use_universal_penalty: Whether to apply universal term penalty
         
     Returns:
         Dict mapping keyword -> opportunity score (0.0 - 1.0)
@@ -489,6 +727,19 @@ def opportunity_scores(
     
     # Determine if we should prioritize commercial value
     prioritize_leads = any(k in goals_lower for k in ["lead", "sales", "revenue", "conversion"])
+    
+    # Detect universal terms if documents provided
+    universal_terms = set()
+    if use_universal_penalty and documents:
+        universal_terms = detect_universal_terms(documents)
+    elif use_universal_penalty:
+        universal_terms = DEFAULT_UNIVERSAL_TERMS
+    
+    # Calculate naturalness scores in batch for efficiency
+    keywords = list(metrics.keys())
+    naturalness_scores = {}
+    if use_naturalness and HAS_SENTENCE_TRANSFORMERS:
+        naturalness_scores = batch_naturalness_scores(keywords)
     
     for k, m in metrics.items():
         intent = intents.get(k, "informational")
@@ -509,6 +760,21 @@ def opportunity_scores(
             score = base_score + (base_score * commercial_boost)
         else:
             score = base_score
+        
+        # Apply naturalness scoring (Week 4)
+        # Low naturalness = likely garbage, reduce score
+        if use_naturalness and k in naturalness_scores:
+            naturalness = naturalness_scores[k]
+            # Naturalness below 0.4 gets heavily penalized
+            if naturalness < 0.4:
+                score *= naturalness  # Strong reduction
+            elif naturalness < 0.6:
+                score *= (0.5 + naturalness)  # Moderate reduction
+        
+        # Apply universal term penalty (Week 4)
+        if use_universal_penalty and universal_terms:
+            penalty = calculate_universal_term_penalty(k, universal_terms)
+            score = score * (1 - penalty)
         
         scores[k] = float(max(0.0, min(1.0, score)))
     
