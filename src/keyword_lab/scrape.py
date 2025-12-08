@@ -521,6 +521,9 @@ def _extract_visible_text(html: str, preserve_structure: bool = True) -> str:
         "advertisement", "ad-container", "sponsor",
         # Forms (often irrelevant for content extraction)
         "contact-form", "newsletter", "subscribe",
+        # Language switchers (source of "en ae" artifacts)
+        "lang-switch", "language-selector", "locale", "wpml",
+        "polylang", "qtranslate", "translatepress",
     ]
     
     for pattern in noise_patterns:
@@ -554,6 +557,36 @@ def _extract_visible_text(html: str, preserve_structure: bool = True) -> str:
         if text.startswith(("+971", "971", "00971", "800")) and len(text) < 20:
             el.decompose()
             continue
+    
+    # ==========================================================================
+    # Phase 3.5: Insert separators between block-level elements
+    # ==========================================================================
+    # This prevents "near me" + "company property" from merging into
+    # "near me company property" when they're in separate DOM elements.
+    
+    from bs4 import NavigableString
+    
+    # Block-level elements that should have clear boundaries
+    block_elements = {
+        "div", "p", "h1", "h2", "h3", "h4", "h5", "h6",
+        "li", "td", "th", "tr", "section", "article", "main",
+        "header", "blockquote", "pre", "br", "hr"
+    }
+    
+    # Insert newlines after block elements to ensure text separation
+    for tag_name in block_elements:
+        for el in soup.find_all(tag_name):
+            # Insert a newline after the element if it has content
+            if el.string or el.get_text(strip=True):
+                # Add newline as a separator
+                el.insert_after(NavigableString("\n"))
+    
+    # Also handle inline elements that often act as boundaries (links, spans in navs)
+    for el in soup.find_all(["a", "button"]):
+        text = el.get_text(strip=True)
+        if text and len(text) < 30:  # Short link text - likely nav element
+            # Add space boundary
+            el.insert_after(NavigableString(" | "))
     
     # ==========================================================================
     # Phase 4: Extract content with structure preservation
