@@ -178,11 +178,14 @@ def run_pipeline(
             delay=float(validation_cfg.get("autocomplete_delay", 0.1)),
         )
 
-    # Metrics (0–1 scale) with autocomplete validation
+    # Metrics (0–1 scale) with autocomplete validation and universal term detection
+    # Pass total_docs for detecting terms that appear in every document (likely noise)
+    total_docs = len(doc_dicts)
     metrics = compute_metrics(
         candidates, clusters, intents, freq, qset, provider,
         serp_total_results=None,  # TODO: pass per-keyword SERP counts when available
         validated_keywords=validated_keywords,
+        total_docs=total_docs,
     )
     
     # Get commercial weight from config if available

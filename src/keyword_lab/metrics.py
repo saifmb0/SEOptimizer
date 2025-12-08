@@ -201,6 +201,7 @@ def raw_volume_proxy(
     freq: int, 
     is_question: bool,
     is_validated: bool = False,
+    total_docs: int = 0,
 ) -> float:
     """
     Calculate raw volume proxy for a keyword.
@@ -210,10 +211,19 @@ def raw_volume_proxy(
         freq: Document frequency count
         is_question: Whether keyword is a question
         is_validated: Whether keyword was validated via autocomplete (2x boost)
+        total_docs: Total documents in corpus (for universal term detection)
         
     Returns:
         Raw volume score (not normalized)
     """
+    # ORYX Fix: Detect universal terms (appear in almost every document)
+    # These are likely stopwords, navigation artifacts, or scraping noise
+    # Example: "en ae" appearing in every page due to language toggle
+    if total_docs > 0 and freq >= total_docs * 0.8:  # Appears in 80%+ of docs
+        # Penalize heavily - likely not a real keyword
+        logging.debug(f"Universal term detected: '{keyword}' (freq={freq}/{total_docs})")
+        return 0.1  # Minimal score
+    
     base = 1.0 + math.log1p(max(1, freq))  # grows slowly
     if is_question:
         base *= 1.2
@@ -225,7 +235,28 @@ def raw_volume_proxy(
     return float(base)
 
 
-def raw_difficulty_proxy(keyword: str, total_results: Optional[int] = None) -> float:
+def raw_difficulty_proxy(
+    keyword: str, 
+    total_results: Optional[int] = None,
+    doc_freq: int = 0,
+    total_docs: int = 0,
+) -> float:
+    """
+    Calculate raw difficulty proxy for a keyword.
+    
+    Args:
+        keyword: The keyword string
+        total_results: Optional SERP total results count
+        doc_freq: Document frequency in corpus
+        total_docs: Total documents in corpus (for universal term detection)
+        
+    Returns:
+        Raw difficulty score
+    """
+    # ORYX Fix: Universal terms get max difficulty (they're noise, not keywords)
+    if total_docs > 0 and doc_freq >= total_docs * 0.8:
+        return 10.0  # Max difficulty - penalize heavily
+    
     if total_results:
         return float(math.log10(max(10, total_results)))  # ~1..10
     length_penalty = 1.0 if len(keyword.split()) <= 2 else 0.6
@@ -336,6 +367,7 @@ def compute_metrics(
     provider: str,
     serp_total_results: Optional[Dict[str, int]] = None,
     validated_keywords: Optional[Dict[str, bool]] = None,
+    total_docs: int = 0,
 ) -> Dict[str, Dict]:
     """
     Compute SEO metrics for keywords.
@@ -349,6 +381,7 @@ def compute_metrics(
         provider: SERP provider used
         serp_total_results: Optional dict of keyword -> total SERP results
         validated_keywords: Optional dict of keyword -> autocomplete validation
+        total_docs: Total documents in corpus (for universal term detection)
         
     Returns:
         Dict mapping keyword to metrics dict
@@ -356,12 +389,21 @@ def compute_metrics(
     validated = validated_keywords or {}
     serp_results = serp_total_results or {}
     
-    # Raw proxies with autocomplete validation boost
+    # Raw proxies with autocomplete validation boost and universal term detection
     v_raw = {
-        k: raw_volume_proxy(k, freq.get(k, 1), k in questions, validated.get(k, False)) 
+        k: raw_volume_proxy(
+            k, freq.get(k, 1), k in questions, 
+            validated.get(k, False), total_docs
+        ) 
         for k in keywords
     }
-    d_raw = {k: raw_difficulty_proxy(k, serp_results.get(k)) for k in keywords}
+    d_raw = {
+        k: raw_difficulty_proxy(
+            k, serp_results.get(k),
+            doc_freq=freq.get(k, 0), total_docs=total_docs
+        ) 
+        for k in keywords
+    }
 
     # Percentile ranking normalization (preserves mid-tier keyword value)
     def normalize_percentile(d: Dict[str, float]) -> Dict[str, float]:
