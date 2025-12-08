@@ -128,13 +128,25 @@ def run(
     # Convert to dict for easy attribute access (handles both Pydantic and legacy)
     cfg_dict = config_to_dict(cfg)
     
-    # Override with preset values if present
+    # Apply preset values ONLY when CLI didn't provide a value
+    # CLI arguments take precedence over preset values
     if preset and cfg:
         # Access Pydantic model attributes or dict keys
-        geo = cfg_dict.get("geo", {}).get("region", geo) if isinstance(cfg_dict.get("geo"), dict) else geo
-        language = getattr(cfg, "language", None) or cfg_dict.get("language", language)
-        audience = cfg_dict.get("audience", audience)
-        business_goals = cfg_dict.get("business_goals", business_goals)
+        # geo: check if it's still the default "global"
+        if geo == "global":
+            geo = cfg_dict.get("geo", {}).get("region", geo) if isinstance(cfg_dict.get("geo"), dict) else cfg_dict.get("geo", geo)
+        # language: check if it's still the default "en"
+        if language == "en":
+            preset_lang = getattr(cfg, "language", None) or cfg_dict.get("language")
+            if preset_lang:
+                language = preset_lang
+        # audience: was already set via CLI or prompt, only override if user didn't provide
+        # Since we prompt for audience if None, we track if it came from CLI
+        # by checking if the preset has a different value (keep CLI value)
+        # Actually, CLI args always take precedence - don't override audience
+        # business_goals: check if it's still the default
+        if business_goals == "traffic, leads":
+            business_goals = cfg_dict.get("business_goals", business_goals)
         max_clusters = cfg_dict.get("cluster", {}).get("max_clusters", max_clusters) if isinstance(cfg_dict.get("cluster"), dict) else cfg_dict.get("max_clusters", max_clusters)
         max_keywords_per_cluster = cfg_dict.get("cluster", {}).get("max_keywords_per_cluster", max_keywords_per_cluster) if isinstance(cfg_dict.get("cluster"), dict) else cfg_dict.get("max_keywords_per_cluster", max_keywords_per_cluster)
         

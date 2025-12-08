@@ -76,8 +76,17 @@ def run_pipeline(
     )
 
     # Build pseudo-doc from seed_topic and audience if no content
+    # Use newlines to separate components - this prevents n-gram crossing
+    # between unrelated text segments (matching the fix in nlp.py)
     if not docs:
-        docs = [Document(url="seed", title=seed_topic, text=f"{seed_topic} {audience} {language} {geo}")]
+        # Split audience by commas to create separate lines
+        audience_parts = [a.strip() for a in audience.split(",") if a.strip()]
+        pseudo_text = "\n".join([
+            seed_topic,
+            *audience_parts,  # Each audience segment on its own line
+            f"{language} {geo}",
+        ])
+        docs = [Document(url="seed", title=seed_topic, text=pseudo_text)]
 
     # Generate keyword candidates from documents
     doc_dicts = [dict(url=d.url, title=d.title, text=d.text) for d in docs]
