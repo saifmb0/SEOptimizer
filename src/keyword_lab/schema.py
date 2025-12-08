@@ -116,16 +116,9 @@ class KeywordData(BaseModel):
             return [s.strip() for s in v.split(",") if s.strip()]
         return list(v)
     
-    @model_validator(mode="after")
-    def calculate_opportunity_if_missing(self) -> "KeywordData":
-        """Calculate opportunity score if metrics are available."""
-        if self.opportunity_score == 0.5 and self.search_volume > 0:
-            # Simple opportunity = volume * (1 - difficulty) * ctr_potential
-            normalized_vol = min(self.search_volume / 10000, 1.0)  # Normalize to 0-1
-            self.opportunity_score = round(
-                normalized_vol * (1 - self.difficulty) * self.ctr_potential, 3
-            )
-        return self
+    # NOTE: opportunity_score auto-calculation removed - pipeline explicitly sets this value
+    # via metrics.opportunity_scores(). Auto-calculation caused issues when validating
+    # data with explicitly-set opportunity_score values (e.g., in tests or external data).
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
