@@ -180,10 +180,40 @@ QUESTION_PREFIXES = [
 # Alias for external access (can be overridden via config)
 DEFAULT_QUESTION_PREFIXES = QUESTION_PREFIXES.copy()
 
+# =============================================================================
+# Semantic Compatibility Rules for Question Generation
+# =============================================================================
+# These rules prevent logically nonsensical combinations like:
+# - "where to buy contracting company" (you hire, not buy companies)
+# - "near me near me warehouse" (duplicate modifiers)
+
+# Service-oriented terms that don't work with "buy" prefixes
+SERVICE_TERMS = frozenset({
+    "company", "companies", "contractor", "contractors", 
+    "service", "services", "agency", "agencies",
+    "firm", "firms", "consultant", "consultants",
+    "provider", "providers", "specialist", "specialists",
+})
+
+# Prefixes that imply purchasing a product (not hiring a service)
+BUY_PREFIXES = frozenset({
+    "buy", "where to buy", "purchase", "order", "shop for",
+})
+
+# Local modifiers that shouldn't be duplicated
+LOCAL_MODIFIERS = frozenset({
+    "near me", "nearby", "local", "in my area",
+})
+
 
 def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Optional[List[str]] = None) -> List[str]:
     """
-    Generate question-style keywords from phrases.
+    Generate question-style keywords from phrases with semantic logic gates.
+    
+    Applies compatibility rules to prevent nonsensical combinations:
+    - No "buy" prefixes for service companies (you hire, not buy)
+    - No duplicate local modifiers ("near me near me")
+    - No redundant question prefixes
     
     Args:
         phrases: Source phrases to expand
@@ -191,17 +221,53 @@ def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Option
         prefixes: Optional custom prefixes (from config), defaults to QUESTION_PREFIXES
         
     Returns:
-        List of generated question keywords
+        List of generated question keywords (semantically valid only)
     """
     question_prefixes = prefixes if prefixes is not None else QUESTION_PREFIXES
     qs = []
+    
     for p in list(phrases)[:top_n]:
         if len(p.split()) < 2:
             continue
+        
+        p_lower = p.lower()
+        p_tokens = set(p_lower.split())
+        
+        # Detect if phrase is about services (not products)
+        is_service_term = bool(p_tokens & SERVICE_TERMS)
+        
+        # Detect if phrase already has a local modifier
+        has_local_modifier = any(mod in p_lower for mod in LOCAL_MODIFIERS)
+        
         for pref in question_prefixes:
+            pref_lower = pref.lower()
+            
+            # =================================================================
+            # RULE 1: Skip "buy" prefixes for service companies
+            # =================================================================
+            # "where to buy contracting company" is nonsensical
+            # Users HIRE contractors, they don't BUY the company
+            if pref_lower in BUY_PREFIXES and is_service_term:
+                continue
+            
+            # =================================================================
+            # RULE 2: Skip local modifiers if phrase already has one
+            # =================================================================
+            # Prevents "near me warehouse near me" duplication
+            if pref_lower in LOCAL_MODIFIERS and has_local_modifier:
+                continue
+            
+            # =================================================================
+            # RULE 3: Skip if prefix is already in the phrase
+            # =================================================================
+            # Prevents "best best contractors" or "how to how to"
+            if pref_lower in p_lower:
+                continue
+            
             q = f"{pref} {p}".strip()
             if len(q.split()) >= 2:
                 qs.append(q)
+    
     return qs
 
 
@@ -220,8 +286,29 @@ def tfidf_top_terms_per_doc(texts: List[str], ngram_range=(2, 3), top_k: int = 1
 
 
 def seed_expansions(seed: str, audience: Optional[str] = None) -> List[str]:
+    """
+    Generate seed-based keyword expansions with semantic logic gates.
+    
+    Applies same compatibility rules as generate_questions:
+    - No "buy" patterns for service-oriented seeds
+    - Contextually appropriate expansions only
+    
+    Args:
+        seed: The seed topic/keyword
+        audience: Optional target audience for additional expansions
+        
+    Returns:
+        List of expanded keywords
+    """
     s = clean_text(seed)
     aud = clean_text(audience or "")
+    s_lower = s.lower()
+    s_tokens = set(s_lower.split())
+    
+    # Detect if seed is about services (not products)
+    is_service_seed = bool(s_tokens & SERVICE_TERMS)
+    
+    # Base patterns that work for all seeds
     patterns = [
         "how to {s}",
         "what is {s}",
@@ -234,18 +321,33 @@ def seed_expansions(seed: str, audience: Optional[str] = None) -> List[str]:
         "{s} vs alternatives",
         "compare {s}",
         "{s} pricing",
-        "buy {s}",
-        "where to buy {s}",
         "{s} near me",
         "beginner {s} guide",
         "advanced {s}",
     ]
+    
+    # Only add "buy" patterns for product-oriented seeds
+    if not is_service_seed:
+        patterns.extend([
+            "buy {s}",
+            "where to buy {s}",
+        ])
+    else:
+        # For service seeds, add "hire" patterns instead
+        patterns.extend([
+            "hire {s}",
+            "find {s}",
+            "{s} quotes",
+            "{s} cost",
+        ])
+    
     if aud:
         patterns.extend([
             "best {s} for {a}",
             "{s} for {a}",
             "how to {s} for {a}",
         ])
+    
     cands = []
     for p in patterns:
         q = p.format(s=s, a=aud).strip()
