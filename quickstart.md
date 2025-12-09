@@ -1,10 +1,10 @@
 # QuickStart
 
-This guide contains the technical details you need to install, configure, and run Keyword Lab.
+This guide contains the technical details you need to install, configure, and run ORYX.
 
 ## 1) Setup
 
-- Python 3.9+
+- Python 3.12+
 - Create and activate a virtual environment:
   - python -m venv .venv && source .venv/bin/activate
 - Install the package:

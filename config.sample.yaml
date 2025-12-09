@@ -29,5 +29,5 @@ nlp:
 scrape:
   timeout: 10
   retries: 2
-  user_agent: "keyword-lab/1.0"
+  user_agent: "oryx/1.0"
   max_serp_results: 10

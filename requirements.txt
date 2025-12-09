@@ -1,4 +1,4 @@
-# ORYX v4.0 - UAE Keyword Intelligence Engine
+# ORYX v3.4.0 - UAE Keyword Intelligence Engine
 # ============================================
 
 # Web scraping and HTTP requests

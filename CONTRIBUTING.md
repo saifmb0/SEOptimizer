@@ -1,14 +1,14 @@
-# Contributing to keyword-lab
+# Contributing to ORYX
 
-Thank you for your interest in contributing to keyword-lab! This guide will help you get started.
+Thank you for your interest in contributing to ORYX! This guide will help you get started.
 
 ## Development Setup
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/keyword-lab.git
-cd keyword-lab
+git clone https://github.com/saifmb0/oryx.git
+cd oryx
 ```
 
 ### 2. Create a Virtual Environment
@@ -115,8 +115,8 @@ git checkout -b feature/your-feature-name
 pytest
 
 # Test the CLI manually
-keyword-lab --help
-keyword-lab run keywords.json -c config.yaml -o output.json
+oryx --help
+oryx run keywords.json -c config.yaml -o output.json
 ```
 
 ### 4. Commit Your Changes
@@ -186,7 +186,7 @@ def write_newformat(df: pd.DataFrame, path: str) -> None:
 When reporting bugs, please include:
 
 1. **Python version**: `python --version`
-2. **Package version**: `pip show keyword-lab`
+2. **Package version**: `pip show oryx`
 3. **OS**: Linux/macOS/Windows
 4. **Minimal reproduction**: Config and keywords to reproduce
 5. **Full error traceback**

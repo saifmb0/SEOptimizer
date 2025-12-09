@@ -1,5 +1,5 @@
 """
-QA Validation Module for Keyword Lab.
+QA Validation Module for ORYX.
 
 Provides quality assurance functions to validate and clean keyword clusters:
 - Discard clusters with fewer than minimum keywords

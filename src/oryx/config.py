@@ -1,5 +1,5 @@
 """
-Configuration loading, merging, and validation for ORYX (Keyword Lab).
+Configuration loading, merging, and validation for ORYX.
 
 Uses Pydantic V2 for strict validation with enterprise-grade error messages.
 """
@@ -156,7 +156,7 @@ class GeoConfig(BaseModel):
 
 class KeywordLabConfig(BaseModel):
     """
-    Complete ORYX (Keyword Lab) configuration schema.
+    Complete ORYX configuration schema.
     
     All fields have sensible UAE-focused defaults.
     Use load_config() to get a fully merged configuration.

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import numpy as np
 from dotenv import load_dotenv
 
-from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url, get_paa_questions
+from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url, get_paa_questions, DEFAULT_CACHE_DIR
 from .nlp import generate_candidates, clean_text
 from .cluster import cluster_keywords, infer_intent
 from .metrics import compute_metrics, opportunity_scores
@@ -72,10 +72,10 @@ def run_pipeline(
         max_serp_results=int(scrape_cfg.get("max_serp_results", 10)),
         timeout=int(scrape_cfg.get("timeout", 10)),
         retries=int(scrape_cfg.get("retries", 2)),
-        user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "keyword-lab/1.0"))),
+        user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "oryx/1.0"))),
         dry_run=dry_run,
         use_cache=bool(scrape_cfg.get("cache_enabled", True)),
-        cache_dir=str(scrape_cfg.get("cache_dir", ".keyword_lab_cache")),
+        cache_dir=str(scrape_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
     )
     
     # Competitor sitemap crawling (the "Hunter" feature)
@@ -86,7 +86,7 @@ def run_pipeline(
             path_filters=competitor_path_filters,
             max_pages_per_domain=max_competitor_pages,
             timeout=int(scrape_cfg.get("timeout", 10)),
-            user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "keyword-lab/1.0"))),
+            user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "oryx/1.0"))),
         )
         
         # Fetch competitor pages
@@ -98,9 +98,9 @@ def run_pipeline(
                 url,
                 timeout=int(scrape_cfg.get("timeout", 10)),
                 retries=int(scrape_cfg.get("retries", 2)),
-                user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "keyword-lab/1.0"))),
+                user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "oryx/1.0"))),
                 use_cache=bool(scrape_cfg.get("cache_enabled", True)),
-                cache_dir=str(scrape_cfg.get("cache_dir", ".keyword_lab_cache")),
+                cache_dir=str(scrape_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
             )
             if fetched:
                 docs.append(fetched)

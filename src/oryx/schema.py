@@ -1,5 +1,5 @@
 """
-Keyword data schema validation for ORYX (Keyword Lab).
+Keyword data schema validation for ORYX.
 
 Uses Pydantic V2 for strict validation with type coercion and custom validators.
 """

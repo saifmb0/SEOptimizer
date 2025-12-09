@@ -166,7 +166,7 @@ def run(
             f"[bold]Seed:[/bold] {seed_topic}\n"
             f"[bold]Audience:[/bold] {audience}\n"
             f"[bold]Geo:[/bold] {geo} | [bold]Language:[/bold] {language}{niche_display}",
-            title="🔬 Keyword Lab",
+            title="ORYX",
             border_style="blue",
         ))
 
@@ -239,7 +239,7 @@ def brief(
     - Entity/topic recommendations
     
     Example:
-        keyword-lab brief keywords.json --cluster cluster-0 -o brief.md
+        oryx brief keywords.json --cluster cluster-0 -o brief.md
     """
     from .llm import _detect_provider, HAS_GENAI, HAS_LITELLM
     
@@ -307,7 +307,7 @@ def geo_brief(
     - Location-based keyword variations
     
     Example:
-        keyword-lab geo-brief keywords.json --geo ae --niche contracting -o brief.md
+        oryx geo-brief keywords.json --geo ae --niche contracting -o brief.md
     """
     from .llm import _detect_provider
     
@@ -726,7 +726,7 @@ def qa(
     - Removing keywords below score thresholds
     
     Example:
-        keyword-lab qa keywords.json --min-cluster-size 3 --max-words 6 --report
+        oryx qa keywords.json --min-cluster-size 3 --max-words 6 --report
     """
     setup_logging(verbose)
     
@@ -797,9 +797,9 @@ def qa(
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """
-    🔬 Keyword Lab - Discover and cluster SEO keywords from any content.
+    🔬 ORYX - Discover and cluster SEO keywords from any content.
     
-    Run 'keyword-lab run' to start the pipeline.
+    Run 'oryx run' to start the pipeline.
     """
     if ctx.invoked_subcommand is None:
         # If no command provided, show help

@@ -1,8 +1,8 @@
 # =============================================================================
 # Niche Preset: Contracting Companies in UAE
 # =============================================================================
-# This preset configures keyword-lab for the UAE construction/contracting market.
-# Use with: keyword-lab --preset presets/contracting_ae.yaml --seed "villa renovation"
+# This preset configures ORYX for the UAE construction/contracting market.
+# Use with: oryx --preset presets/contracting_ae.yaml --seed "villa renovation"
 # =============================================================================
 
 # Market Configuration

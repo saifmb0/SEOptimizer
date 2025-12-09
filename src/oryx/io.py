@@ -1,5 +1,5 @@
 """
-Input/Output utilities for ORYX (Keyword Lab).
+Input/Output utilities for ORYX.
 
 Provides professional Excel reporting with charts, multi-tab analysis,
 and stakeholder-ready outputs for the UAE contracting sector.
@@ -94,7 +94,7 @@ def write_excel(
     
     if not HAS_OPENPYXL:
         logging.warning(
-            "Excel export requires openpyxl. Install with: pip install keyword-lab[excel]"
+            "Excel export requires openpyxl. Install with: pip install oryx[excel]"
         )
         return
     
