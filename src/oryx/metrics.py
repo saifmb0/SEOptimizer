@@ -676,7 +676,7 @@ def compute_metrics(
         serp_features = estimate_serp_features(k, intent)
         
         metrics[k] = {
-            "search_volume": float(max(0.0, min(1.0, v_norm.get(k, 0.5)))),
+            "relative_interest": float(max(0.0, min(1.0, v_norm.get(k, 0.5)))),
             "difficulty": float(max(0.0, min(1.0, d_norm.get(k, 0.5)))),
             "ctr_potential": ctr,
             "serp_features": serp_features,
@@ -701,7 +701,7 @@ def opportunity_scores(
     """
     Calculate opportunity scores for keywords with quality filtering.
     
-    Formula: (search_volume * ctr * (1 - difficulty) * relevance) * naturalness - universal_penalty
+    Formula: (relative_interest * ctr * (1 - difficulty) * relevance) * naturalness - universal_penalty
     
     Week 4 additions:
     - Naturalness scoring via sentence-transformers (penalizes nonsense)
@@ -744,7 +744,7 @@ def opportunity_scores(
     for k, m in metrics.items():
         intent = intents.get(k, "informational")
         br = business_relevance(intent, goals)  # 0.6..1.0
-        v = m.get("search_volume", 0.0)
+        v = m.get("relative_interest", 0.0)
         d = m.get("difficulty", 0.5)
         ctr = m.get("ctr_potential", 1.0) if use_ctr_adjustment else 1.0
         

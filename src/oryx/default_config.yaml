@@ -154,6 +154,7 @@ qa:
   # Set higher to focus on high-value keywords only
   min_opportunity_score: 0.0
   
-  # Minimum search volume threshold (0.0-1.0)
-  # Set higher to exclude low-volume long-tail keywords
-  min_search_volume: 0.0
+  # Minimum relative interest threshold (0.0-1.0)
+  # Note: This is a normalized score (0-1), NOT absolute search volume
+  # Set higher to exclude low-interest long-tail keywords
+  min_relative_interest: 0.0

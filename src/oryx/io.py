@@ -173,7 +173,7 @@ def _create_executive_summary(
     metrics = [
         ("Total Keywords", len(df)),
         ("Unique Clusters", df['cluster'].nunique() if 'cluster' in df.columns else "N/A"),
-        ("Avg. Search Volume", f"{df['search_volume'].mean():,.0f}" if 'search_volume' in df.columns else "N/A"),
+        ("Avg. Relative Interest", f"{df['relative_interest'].mean():.2f}" if 'relative_interest' in df.columns else "N/A"),
         ("Avg. Difficulty", f"{df['difficulty'].mean():.2f}" if 'difficulty' in df.columns else "N/A"),
         ("Avg. Opportunity Score", f"{df['opportunity_score'].mean():.2f}" if 'opportunity_score' in df.columns else "N/A"),
         ("High-Priority Keywords", len(df[(df.get('opportunity_score', 0) >= 0.5)]) if 'opportunity_score' in df.columns else "N/A"),
@@ -281,11 +281,11 @@ def _create_cluster_analysis(
     # Create summary
     summary = df.groupby('cluster').agg({
         'keyword': 'count',
-        'search_volume': ['sum', 'mean'],
+        'relative_interest': ['sum', 'mean'],
         'difficulty': 'mean',
         'opportunity_score': 'mean',
     }).round(3)
-    summary.columns = ['count', 'total_volume', 'avg_volume', 'avg_difficulty', 'avg_opportunity']
+    summary.columns = ['count', 'total_interest', 'avg_interest', 'avg_difficulty', 'avg_opportunity']
     summary = summary.sort_values('avg_opportunity', ascending=False).reset_index()
     
     # Write data
@@ -335,11 +335,11 @@ def _create_intent_analysis(
     # Create summary
     intent_summary = df.groupby('intent').agg({
         'keyword': 'count',
-        'search_volume': 'mean',
+        'relative_interest': 'mean',
         'difficulty': 'mean',
         'opportunity_score': 'mean',
     }).round(3)
-    intent_summary.columns = ['count', 'avg_volume', 'avg_difficulty', 'avg_opportunity']
+    intent_summary.columns = ['count', 'avg_interest', 'avg_difficulty', 'avg_opportunity']
     intent_summary = intent_summary.sort_values('count', ascending=False).reset_index()
     
     # Write data

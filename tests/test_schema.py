@@ -8,7 +8,7 @@ def test_schema_validation():
             "parent_topic": "coffee beans",
             "intent": "commercial",
             "funnel_stage": "MOFU",
-            "search_volume": 200,
+            "relative_interest": 0.8,
             "difficulty": 0.4,
             "ctr_potential": 0.85,
             "serp_features": ["top_ads", "shopping_results"],

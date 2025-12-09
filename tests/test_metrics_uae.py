@@ -182,8 +182,8 @@ class TestOpportunityScores:
         """Lower CTR potential should reduce opportunity score."""
         # Create metrics with different CTR potentials
         metrics = {
-            "high_ctr_kw": {"search_volume": 0.5, "difficulty": 0.3, "ctr_potential": 0.9},
-            "low_ctr_kw": {"search_volume": 0.5, "difficulty": 0.3, "ctr_potential": 0.4},
+            "high_ctr_kw": {"relative_interest": 0.5, "difficulty": 0.3, "ctr_potential": 0.9},
+            "low_ctr_kw": {"relative_interest": 0.5, "difficulty": 0.3, "ctr_potential": 0.4},
         }
         intents = {"high_ctr_kw": "commercial", "low_ctr_kw": "commercial"}
         
@@ -195,8 +195,8 @@ class TestOpportunityScores:
     def test_lead_goals_boost_commercial(self):
         """Lead-focused goals should boost commercial keywords."""
         metrics = {
-            "commercial_kw": {"search_volume": 0.5, "difficulty": 0.3, "ctr_potential": 0.8},
-            "info_kw": {"search_volume": 0.5, "difficulty": 0.3, "ctr_potential": 0.8},
+            "commercial_kw": {"relative_interest": 0.5, "difficulty": 0.3, "ctr_potential": 0.8},
+            "info_kw": {"relative_interest": 0.5, "difficulty": 0.3, "ctr_potential": 0.8},
         }
         intents = {"commercial_kw": "transactional", "info_kw": "informational"}
         
@@ -209,7 +209,7 @@ class TestOpportunityScores:
     def test_niche_scoring(self):
         """Niche parameter should affect scoring."""
         metrics = {
-            "fit out dubai": {"search_volume": 0.5, "difficulty": 0.3, "ctr_potential": 0.7},
+            "fit out dubai": {"relative_interest": 0.5, "difficulty": 0.3, "ctr_potential": 0.7},
         }
         intents = {"fit out dubai": "commercial"}
         
@@ -223,7 +223,7 @@ class TestOpportunityScores:
     def test_ctr_adjustment_can_be_disabled(self):
         """CTR adjustment should be disableable."""
         metrics = {
-            "kw": {"search_volume": 0.5, "difficulty": 0.3, "ctr_potential": 0.5},
+            "kw": {"relative_interest": 0.5, "difficulty": 0.3, "ctr_potential": 0.5},
         }
         intents = {"kw": "commercial"}
         

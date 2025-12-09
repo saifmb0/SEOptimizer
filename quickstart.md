@@ -36,7 +36,7 @@ This guide contains the technical details you need to install, configure, and ru
 ## 4) Output
 
 - JSON array of objects with fields:
-  - keyword, cluster, intent, funnel_stage, search_volume (0–1), difficulty (0–1), estimated (bool), opportunity_score (0–1)
+  - keyword, cluster, intent, funnel_stage, relative_interest (0–1, normalized score NOT absolute volume), difficulty (0–1), estimated (bool), opportunity_score (0–1)
 - CSV mirror when --save-csv is provided.
 
 ## 5) Tests

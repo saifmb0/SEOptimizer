@@ -246,7 +246,7 @@ def run_pipeline(
     # Assemble per cluster, prioritize opportunity score within clusters
     items: List[Dict] = []
     for cname, kws in clusters.items():
-        kws_sorted = sorted(kws, key=lambda k: (opp.get(k, 0), metrics.get(k, {}).get("search_volume", 0)), reverse=True)
+        kws_sorted = sorted(kws, key=lambda k: (opp.get(k, 0), metrics.get(k, {}).get("relative_interest", 0)), reverse=True)
         selected = []
         seen = set()
         for kw in kws_sorted:
@@ -270,7 +270,7 @@ def run_pipeline(
                 "parent_topic": pt.lower() if isinstance(pt, str) else str(pt).lower(),
                 "intent": intents.get(kw, "informational"),
                 "funnel_stage": to_funnel_stage(intents.get(kw, "informational")),
-                "search_volume": float(m.get("search_volume", 0.0)),
+                "relative_interest": float(m.get("relative_interest", 0.0)),
                 "difficulty": float(m.get("difficulty", 0.0)),
                 "ctr_potential": float(m.get("ctr_potential", 1.0)),
                 "serp_features": serp_features,
@@ -280,8 +280,8 @@ def run_pipeline(
             }
             items.append(it)
 
-    # Global ranking by opportunity_score (then search_volume desc, then keyword asc)
-    items = sorted(items, key=lambda it: (-it["opportunity_score"], -it["search_volume"], it["keyword"]))
+    # Global ranking by opportunity_score (then relative_interest desc, then keyword asc)
+    items = sorted(items, key=lambda it: (-it["opportunity_score"], -it["relative_interest"], it["keyword"]))
 
     # ORYX Quality Gate: Filter unvalidated low-opportunity keywords
     # Keeps validated keywords OR high-opportunity unvalidated ones

@@ -53,7 +53,7 @@ def display_results_table(items: List[dict], max_rows: int = 25):
     table.add_column("Cluster", style="green")
     table.add_column("Intent", style="yellow")
     table.add_column("Funnel", style="blue")
-    table.add_column("Vol", justify="right", style="white")
+    table.add_column("Interest", justify="right", style="white")
     table.add_column("Diff", justify="right", style="white")
     table.add_column("Opp", justify="right", style="bold green")
     
@@ -63,7 +63,7 @@ def display_results_table(items: List[dict], max_rows: int = 25):
             item["cluster"],
             item["intent"],
             item["funnel_stage"],
-            f"{item['search_volume']:.2f}",
+            f"{item['relative_interest']:.2f}",
             f"{item['difficulty']:.2f}",
             f"{item['opportunity_score']:.2f}",
         )
@@ -363,7 +363,7 @@ def _generate_content_brief(cluster_name: str, keywords: List[dict], provider: s
     kw_list = [k["keyword"] for k in keywords]
     intents = set(k.get("intent", "informational") for k in keywords)
     primary_intent = max(intents, key=lambda i: sum(1 for k in keywords if k.get("intent") == i))
-    avg_volume = sum(k.get("search_volume", 0) for k in keywords) / len(keywords)
+    avg_interest = sum(k.get("relative_interest", 0) for k in keywords) / len(keywords)
     avg_difficulty = sum(k.get("difficulty", 0) for k in keywords) / len(keywords)
     questions = [k["keyword"] for k in keywords if any(
         k["keyword"].startswith(q) for q in ["how", "what", "why", "when", "where", "which", "who"]
@@ -436,7 +436,7 @@ def _generate_geo_brief(
     kw_list = [k["keyword"] for k in keywords]
     intents = set(k.get("intent", "informational") for k in keywords)
     primary_intent = max(intents, key=lambda i: sum(1 for k in keywords if k.get("intent") == i))
-    avg_volume = sum(k.get("search_volume", 0) for k in keywords) / len(keywords)
+    avg_interest = sum(k.get("relative_interest", 0) for k in keywords) / len(keywords)
     avg_difficulty = sum(k.get("difficulty", 0) for k in keywords) / len(keywords)
     avg_ctr = sum(k.get("ctr_potential", 1.0) for k in keywords) / len(keywords)
     
@@ -749,7 +749,7 @@ def qa(
         max_word_count=max_words,
         min_word_count=min_words,
         min_opportunity_score=min_opportunity,
-        min_search_volume=min_volume,
+        min_relative_interest=min_volume,
     )
     
     # Display summary
