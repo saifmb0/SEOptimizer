@@ -6,14 +6,14 @@ from typing import Dict, List, Optional
 import numpy as np
 from dotenv import load_dotenv
 
-from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url
-from .nlp import generate_candidates, clean_text, DEFAULT_QUESTION_PREFIXES, seed_expansions
+from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url, get_paa_questions
+from .nlp import generate_candidates, clean_text
 from .cluster import cluster_keywords, infer_intent
 from .metrics import compute_metrics, opportunity_scores
 from .schema import validate_items
 from .io import write_output
 from .llm import expand_with_llm, assign_parent_topics, verify_candidates_with_llm
-from .config import load_config, get_intent_rules, get_question_prefixes, config_to_dict
+from .config import load_config, get_intent_rules, config_to_dict
 
 
 def to_funnel_stage(intent: str) -> str:
@@ -63,7 +63,6 @@ def run_pipeline(
     
     # Get configurable rules (handles both Pydantic and dict)
     intent_rules = get_intent_rules(config)
-    question_prefixes = get_question_prefixes(config)
 
     # Acquire documents (with caching for faster iterations)
     docs = acquire_documents(
@@ -121,17 +120,24 @@ def run_pipeline(
         ])
         docs = [Document(url="seed", title=seed_topic, text=pseudo_text)]
 
-    # Generate keyword candidates from documents
+    # Generate keyword candidates from documents (EXTRACTION ONLY)
     doc_dicts = [dict(url=d.url, title=d.title, text=d.text) for d in docs]
     candidates = generate_candidates(
         doc_dicts,
         ngram_min_df=int(nlp_cfg.get("ngram_min_df", 2)),
         top_terms_per_doc=int(nlp_cfg.get("top_terms_per_doc", 10)),
-        question_prefixes=question_prefixes,
     )
 
-    # Seed-based and LLM expansions
-    seed_cands = seed_expansions(seed_topic, audience)
+    # ==========================================================================
+    # EXTRACTION ONLY: No heuristic seed expansion
+    # ==========================================================================
+    # REMOVED: seed_expansions() which produced garbage like "how to villa"
+    # We now trust only the exact seed and real data sources:
+    # - LLM generation (understands grammar)
+    # - PAA questions from Google/Bing (verified real queries)
+    seed_cands = [seed_topic.lower()]
+    
+    # LLM-based expansion (grammar-aware)
     llm_cfg = cfg_dict.get("llm", {})
     llm_cands = expand_with_llm(
         seed_topic, audience, language, geo, 
@@ -139,7 +145,19 @@ def run_pipeline(
         provider=llm_cfg.get("provider", "auto"),
         model=llm_cfg.get("model"),
     )
-    candidates = list(dict.fromkeys([*candidates, *seed_cands, *llm_cands]))
+    
+    # Fetch real PAA questions from search engines (verified queries)
+    paa_questions = []
+    if provider and provider != "none":
+        paa_questions = get_paa_questions(
+            query or seed_topic,
+            provider=provider,
+        )
+        if paa_questions:
+            logging.info(f"Acquired {len(paa_questions)} real PAA questions from {provider}")
+    
+    # Combine ONLY verified data sources
+    candidates = list(dict.fromkeys([*candidates, *seed_cands, *llm_cands, *paa_questions]))
 
     # Apply blacklist and length filtering
     filter_cfg = cfg_dict.get("filtering", {})
@@ -174,10 +192,13 @@ def run_pipeline(
         return []
 
     # Detect question-style keywords for volume boost
+    # Use common question prefixes directly (no longer from config)
+    QUESTION_PREFIXES = ["how", "what", "why", "when", "where", "which", "who", "can", "does", "is"]
     qset = set()
     for kw in candidates:
-        for pref in question_prefixes:
-            if kw.startswith(pref + " "):
+        kw_lower = kw.lower()
+        for pref in QUESTION_PREFIXES:
+            if kw_lower.startswith(pref + " "):
                 qset.add(kw)
                 break
 

@@ -1282,28 +1282,28 @@ def generate_candidates(
     docs: List[Dict], 
     ngram_min_df: int = 2, 
     top_terms_per_doc: int = 10,
-    question_prefixes: Optional[List[str]] = None,
     language: str = "en",
 ) -> List[str]:
     """
-    Generate keyword candidates with strict sentence boundary detection.
+    Extract keyword candidates from documents using EXTRACTION ONLY.
     
-    Uses NLTK sentence tokenization to ensure proper boundaries:
-    - "Contact Us" never merges with content paragraphs
-    - Footer links stay isolated from main content
-    - Navigation elements don't contaminate keywords
+    This function uses NLTK sentence tokenization to ensure proper boundaries
+    and extracts ONLY what exists in the source material:
+    - N-grams that actually appear in documents
+    - TF-IDF significant terms
     
-    The key insight: n-grams should NEVER cross sentence/line boundaries.
+    NO heuristic question generation - real questions should come from:
+    - LLM generation (understands grammar)
+    - PAA/Related Searches from Google/Bing (verified real queries)
     
     Args:
         docs: List of document dicts with 'text' field
         ngram_min_df: Minimum document frequency for ngrams
         top_terms_per_doc: Number of top TF-IDF terms per document
-        question_prefixes: Optional custom question prefixes (from config)
         language: Language code for sentence tokenization
         
     Returns:
-        List of candidate keywords (filtered for scraping artifacts)
+        List of candidate keywords (extracted from real text only)
     """
     # ==========================================================================
     # Step 1: Sentence Tokenization with Strict Boundaries
@@ -1338,19 +1338,17 @@ def generate_candidates(
     ngram_list = counts_df["ngram"].tolist()
     
     # ==========================================================================
-    # Step 3: Smart Question Generation
+    # Step 3: EXTRACTION ONLY - No Heuristic Question Generation
     # ==========================================================================
-    # Filter artifacts BEFORE generating questions to prevent
-    # "where to buy en ae" type nonsense
-    
-    questions = []
-    if ngram_list:
-        clean_ngrams = filter_scraping_artifacts(ngram_list)
-        questions = generate_questions(
-            clean_ngrams, 
-            top_n=min(50, len(clean_ngrams)), 
-            prefixes=question_prefixes
-        )
+    # REMOVED: generate_questions() call that was producing garbage like
+    # "how construction company" by blindly smashing prefixes onto n-grams.
+    # 
+    # Real questions should come from:
+    # - LLM generation (understands grammar)
+    # - PAA/Related Searches from Google/Bing (verified real queries)
+    # - Actual question phrases extracted from document text
+    #
+    # We now trust ONLY what exists in the source material.
     
     # ==========================================================================
     # Step 4: TF-IDF on reconstructed docs with sentence boundaries
@@ -1369,9 +1367,9 @@ def generate_candidates(
     tfidf_terms = tfidf_top_terms_per_doc(reconstructed_docs, top_k=top_terms_per_doc)
     
     # ==========================================================================
-    # Step 5: Combine and filter
+    # Step 5: Combine and filter (EXTRACTION ONLY - no synthesized questions)
     # ==========================================================================
-    cands = list(dict.fromkeys([*ngram_list, *questions, *tfidf_terms]))
+    cands = list(dict.fromkeys([*ngram_list, *tfidf_terms]))
     cands = [c.strip().lower() for c in cands if len(c.split()) >= 2]
     
     # Filter scraping artifacts
