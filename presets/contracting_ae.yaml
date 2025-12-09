@@ -42,7 +42,21 @@ locale_terminology:
     - "labour camp"       # Worker accommodation
     - "warehouse"         # Industrial construction
     - "portacabin"        # Temporary structures
-    
+
+  filtering:
+  blacklist:
+    - "monday"
+    - "tuesday"
+    - "wednesday"
+    - "thursday"
+    - "friday"
+    - "saturday"
+    - "sunday"
+    - "rights reserved"
+    - "copyright"
+    - "term"
+    - "condition"
+
   # UAE regulatory/permit terms
   regulatory:
     - "Musataha"          # Long-term land lease
