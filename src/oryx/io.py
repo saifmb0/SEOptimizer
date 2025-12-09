@@ -118,26 +118,29 @@ def write_excel(
     if include_executive_summary:
         _create_executive_summary(workbook, df, report_title, geo)
     
-    # 2. Keywords Sheet (main data)
+    # 2. Site Architecture (hierarchical: Parent Topic -> Cluster -> Keywords)
+    _create_site_architecture_sheet(workbook, df)
+    
+    # 3. Keywords Sheet (main data)
     _create_keywords_sheet(workbook, df)
     
-    # 3. Cluster Analysis
+    # 4. Cluster Analysis
     _create_cluster_analysis(workbook, df, include_charts)
     
-    # 4. Intent Breakdown
+    # 5. Intent Breakdown
     _create_intent_analysis(workbook, df, include_charts)
     
-    # 5. Priority Matrix
+    # 6. Priority Matrix
     _create_priority_matrix(workbook, df)
     
-    # 6. GEO Analysis (if available)
+    # 7. GEO Analysis (if available)
     _create_geo_analysis(workbook, df)
     
-    # 7. Location Analysis (UAE)
+    # 8. Location Analysis (UAE)
     if geo.lower() == 'ae':
         _create_location_analysis(workbook, df)
     
-    # 8. Recommendations
+    # 9. Recommendations
     _create_recommendations(workbook, df, geo)
     
     # Save workbook
@@ -211,6 +214,86 @@ def _create_executive_summary(
     sheet.column_dimensions['A'].width = 30
     sheet.column_dimensions['B'].width = 20
     sheet.column_dimensions['C'].width = 15
+
+
+def _create_site_architecture_sheet(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
+    """
+    Create a hierarchical site architecture sheet.
+    
+    Groups keywords by Parent Topic -> Cluster to visualize website structure.
+    This helps content managers understand the recommended site hierarchy.
+    """
+    if 'parent_topic' not in df.columns or 'cluster' not in df.columns:
+        return
+    
+    sheet = workbook.create_sheet("Site Architecture")
+    
+    # Header
+    sheet['A1'] = "SITE ARCHITECTURE"
+    sheet['A1'].font = Font(size=16, bold=True, color=ORYX_COLORS["primary"])
+    sheet.merge_cells('A1:D1')
+    
+    sheet['A2'] = "Hierarchical view: Parent Topic → Cluster → Keywords"
+    sheet['A2'].font = Font(size=10, italic=True, color="666666")
+    
+    # Column headers
+    headers = ["Level", "Topic/Cluster/Keyword", "Intent", "Opportunity"]
+    for c_idx, header in enumerate(headers, 1):
+        cell = sheet.cell(row=4, column=c_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=ORYX_COLORS["primary"], 
+                                end_color=ORYX_COLORS["primary"], fill_type="solid")
+    
+    row_idx = 5
+    
+    # Group by parent_topic, then cluster
+    for parent_topic in df['parent_topic'].unique():
+        # L1: Parent Topic (Pillar)
+        cell = sheet.cell(row=row_idx, column=1, value="L1 - Pillar")
+        cell.font = Font(bold=True, color=ORYX_COLORS["primary"])
+        
+        cell = sheet.cell(row=row_idx, column=2, value=parent_topic.title())
+        cell.font = Font(bold=True, size=12)
+        
+        # Calculate average opportunity for parent topic
+        pt_df = df[df['parent_topic'] == parent_topic]
+        avg_opp = pt_df['opportunity_score'].mean()
+        sheet.cell(row=row_idx, column=4, value=f"{avg_opp:.2f}")
+        
+        row_idx += 1
+        
+        # L2: Clusters under this parent topic
+        for cluster in pt_df['cluster'].unique():
+            cell = sheet.cell(row=row_idx, column=1, value="  L2 - Cluster")
+            cell.font = Font(color=ORYX_COLORS["secondary"])
+            
+            cell = sheet.cell(row=row_idx, column=2, value=f"  └─ {cluster}")
+            cell.font = Font(bold=True, color=ORYX_COLORS["secondary"])
+            
+            cluster_df = pt_df[pt_df['cluster'] == cluster]
+            cluster_opp = cluster_df['opportunity_score'].mean()
+            sheet.cell(row=row_idx, column=4, value=f"{cluster_opp:.2f}")
+            
+            row_idx += 1
+            
+            # L3: Keywords in this cluster
+            for _, kw_row in cluster_df.head(5).iterrows():  # Top 5 per cluster
+                sheet.cell(row=row_idx, column=1, value="    L3 - Keyword")
+                sheet.cell(row=row_idx, column=2, value=f"      └─ {kw_row['keyword']}")
+                sheet.cell(row=row_idx, column=3, value=kw_row.get('intent', ''))
+                sheet.cell(row=row_idx, column=4, value=f"{kw_row['opportunity_score']:.2f}")
+                row_idx += 1
+        
+        row_idx += 1  # Add spacing between parent topics
+    
+    # Column widths
+    sheet.column_dimensions['A'].width = 15
+    sheet.column_dimensions['B'].width = 50
+    sheet.column_dimensions['C'].width = 15
+    sheet.column_dimensions['D'].width = 12
+    
+    # Freeze header
+    sheet.freeze_panes = 'A5'
 
 
 def _create_keywords_sheet(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
