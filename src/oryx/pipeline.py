@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import numpy as np
 from dotenv import load_dotenv
 
-from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete
+from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url
 from .nlp import generate_candidates, clean_text, DEFAULT_QUESTION_PREFIXES, seed_expansions
 from .cluster import cluster_keywords, infer_intent
 from .metrics import compute_metrics, opportunity_scores
@@ -45,6 +45,9 @@ def run_pipeline(
     dry_run: bool = False,
     niche: Optional[str] = None,
     use_run_dir: bool = False,
+    crawl_competitors: bool = False,
+    competitor_path_filters: Optional[List[str]] = None,
+    max_competitor_pages: int = 50,
 ) -> List[Dict]:
     load_dotenv()
 
@@ -75,6 +78,35 @@ def run_pipeline(
         use_cache=bool(scrape_cfg.get("cache_enabled", True)),
         cache_dir=str(scrape_cfg.get("cache_dir", ".keyword_lab_cache")),
     )
+    
+    # Competitor sitemap crawling (the "Hunter" feature)
+    if crawl_competitors and competitors and not dry_run:
+        logging.info(f"Crawling {len(competitors)} competitor sitemaps...")
+        competitor_urls = crawl_competitor_sitemaps(
+            competitor_domains=competitors,
+            path_filters=competitor_path_filters,
+            max_pages_per_domain=max_competitor_pages,
+            timeout=int(scrape_cfg.get("timeout", 10)),
+            user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "keyword-lab/1.0"))),
+        )
+        
+        # Fetch competitor pages
+        for url in competitor_urls:
+            # Avoid duplicates
+            if any(d.url == url for d in docs):
+                continue
+            fetched = fetch_url(
+                url,
+                timeout=int(scrape_cfg.get("timeout", 10)),
+                retries=int(scrape_cfg.get("retries", 2)),
+                user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "keyword-lab/1.0"))),
+                use_cache=bool(scrape_cfg.get("cache_enabled", True)),
+                cache_dir=str(scrape_cfg.get("cache_dir", ".keyword_lab_cache")),
+            )
+            if fetched:
+                docs.append(fetched)
+        
+        logging.info(f"Total documents after competitor crawl: {len(docs)}")
 
     # Build pseudo-doc from seed_topic and audience if no content
     # Use newlines to separate components - this prevents n-gram crossing

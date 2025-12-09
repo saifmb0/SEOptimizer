@@ -996,6 +996,96 @@ def parse_sitemap(sitemap_url: str, timeout: int = 15, user_agent: str = DEFAULT
     return urls
 
 
+def crawl_competitor_sitemaps(
+    competitor_domains: List[str],
+    path_filters: Optional[List[str]] = None,
+    max_pages_per_domain: int = 50,
+    timeout: int = 15,
+    user_agent: str = DEFAULT_UA,
+) -> List[str]:
+    """
+    Crawl competitor sitemaps to discover all their pages.
+    
+    This is the "Hunter" feature that automatically finds competitor content
+    without requiring manual URL collection.
+    
+    Args:
+        competitor_domains: List of competitor domains (e.g., ['competitor.ae', 'example.com'])
+        path_filters: Optional list of path patterns to filter (e.g., ['/services/', '/blog/'])
+            If None, includes all pages
+        max_pages_per_domain: Maximum pages to extract per domain
+        timeout: Request timeout
+        user_agent: User agent string
+        
+    Returns:
+        List of discovered URLs
+        
+    Example:
+        >>> urls = crawl_competitor_sitemaps(
+        ...     ['competitor.ae'],
+        ...     path_filters=['/services/', '/projects/']
+        ... )
+    """
+    all_urls: List[str] = []
+    
+    for domain in competitor_domains:
+        # Normalize domain
+        domain = domain.strip().lower()
+        if not domain:
+            continue
+            
+        # Remove protocol if present
+        if domain.startswith("http://"):
+            domain = domain[7:]
+        elif domain.startswith("https://"):
+            domain = domain[8:]
+        
+        # Remove trailing slash
+        domain = domain.rstrip("/")
+        
+        # Try common sitemap locations
+        sitemap_urls = [
+            f"https://{domain}/sitemap.xml",
+            f"https://{domain}/sitemap_index.xml",
+            f"https://{domain}/sitemap-index.xml",
+            f"https://{domain}/sitemaps/sitemap.xml",
+        ]
+        
+        domain_urls: List[str] = []
+        for sitemap_url in sitemap_urls:
+            urls = parse_sitemap(sitemap_url, timeout=timeout, user_agent=user_agent)
+            if urls:
+                logging.info(f"Found sitemap for {domain} at {sitemap_url}")
+                domain_urls.extend(urls)
+                break  # Found a working sitemap, stop trying others
+        
+        if not domain_urls:
+            logging.warning(f"No sitemap found for {domain}. Consider adding robots.txt parsing.")
+            continue
+        
+        # Apply path filters if specified
+        if path_filters:
+            filtered_urls = []
+            for url in domain_urls:
+                for pattern in path_filters:
+                    if pattern.lower() in url.lower():
+                        filtered_urls.append(url)
+                        break
+            domain_urls = filtered_urls
+            logging.info(f"Filtered to {len(domain_urls)} URLs matching patterns: {path_filters}")
+        
+        # Limit pages per domain
+        if len(domain_urls) > max_pages_per_domain:
+            logging.info(f"Limiting {domain} from {len(domain_urls)} to {max_pages_per_domain} pages")
+            domain_urls = domain_urls[:max_pages_per_domain]
+        
+        all_urls.extend(domain_urls)
+        logging.info(f"Discovered {len(domain_urls)} pages from {domain}")
+    
+    logging.info(f"Total competitor pages discovered: {len(all_urls)}")
+    return all_urls
+
+
 def read_local_sources(path: str) -> List[Document]:
     import pathlib
 

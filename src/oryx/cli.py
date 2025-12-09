@@ -102,6 +102,9 @@ def run(
     preset: Optional[str] = typer.Option(None, "--preset", help="Niche preset file (e.g., presets/contracting_ae.yaml)"),
     niche: Optional[str] = typer.Option(None, "--niche", help="Niche for commercial scoring (contracting, real_estate, legal)"),
     use_run_dir: bool = typer.Option(False, "--run-dir", help="Save outputs in ./data/run_id=YYYYMMDDHHMM/"),
+    crawl_competitors: bool = typer.Option(False, "--crawl-competitors", help="Spider competitor sitemaps to discover their pages"),
+    competitor_path_filters: Optional[str] = typer.Option(None, "--competitor-paths", help="Comma-separated path patterns (e.g., '/services/,/blog/')"),
+    max_competitor_pages: int = typer.Option(50, "--max-competitor-pages", help="Max pages per competitor domain"),
 ):
     """
     Run the keyword discovery pipeline.
@@ -167,6 +170,11 @@ def run(
             border_style="blue",
         ))
 
+    # Parse competitor path filters
+    path_filters = None
+    if competitor_path_filters:
+        path_filters = [p.strip() for p in competitor_path_filters.split(",") if p.strip()]
+
     items = run_pipeline(
         seed_topic=seed_topic,
         audience=audience,
@@ -188,6 +196,9 @@ def run(
         dry_run=dry_run,
         niche=effective_niche,
         use_run_dir=use_run_dir,
+        crawl_competitors=crawl_competitors,
+        competitor_path_filters=path_filters,
+        max_competitor_pages=max_competitor_pages,
     )
 
     # Output display
