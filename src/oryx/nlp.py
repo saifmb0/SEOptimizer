@@ -164,10 +164,56 @@ MAX_NOUN_CLUSTER_SIZE = 3
 
 # Minimum meaningful words (non-stopwords, non-geo) for phrases starting with certain words
 MIN_MEANINGFUL_WORDS_FOR_VS = 2  # "vs" needs at least 2 meaningful words after it
-GEO_TOKENS = frozenset({"uae", "dubai", "abu", "dhabi", "sharjah", "ae", "en", "ar", "ajman", "fujairah"})
+GEO_TOKENS = frozenset({"uae", "dubai", "abu", "dhabi", "sharjah", "ae", "en", "ar", "ajman", "fujairah", "khaimah", "ras"})
 
 # Common stopwords that don't count as meaningful
 COMMON_STOPWORDS = frozenset({"the", "a", "an", "is", "are", "was", "were", "be", "been", "being"})
+
+# =============================================================================
+# Stop-Phrase Filter
+# =============================================================================
+# Keywords that consist ONLY of a prefix/stopword + geo are meaningless
+# e.g., "for abu dhabi", "in dubai", "how uae" should be discarded
+STOP_PHRASE_PREFIXES = frozenset({
+    "for", "in", "at", "on", "to", "from", "with", "by", "of",
+    "how", "what", "where", "when", "why", "which", "who",
+})
+
+
+def is_stop_phrase(keyword: str) -> bool:
+    """
+    Check if keyword is a meaningless stop-phrase.
+    
+    A stop-phrase is a keyword that consists only of:
+    - A prefix/stopword + geo tokens (e.g., "for abu dhabi", "in dubai")
+    - Question word + geo only (e.g., "how uae", "what dubai")
+    
+    Args:
+        keyword: The keyword to check
+        
+    Returns:
+        True if the keyword is a stop-phrase that should be discarded
+    """
+    words = keyword.lower().split()
+    if len(words) < 2:
+        return False
+    
+    first_word = words[0]
+    remaining = set(words[1:])
+    
+    # If first word is a stop-phrase prefix and ALL remaining words are geo tokens
+    if first_word in STOP_PHRASE_PREFIXES:
+        if remaining.issubset(GEO_TOKENS):
+            return True
+    
+    # Also check for patterns like "how to abu dhabi" (stopword + to + geo)
+    if len(words) >= 2:
+        meaningful = [w for w in words if w not in STOP_PHRASE_PREFIXES and w not in GEO_TOKENS and w not in {"to", "the", "a", "an"}]
+        if not meaningful:
+            return True
+    
+    return False
+
 
 # =============================================================================
 # Negative Sentiment Shield
@@ -1102,6 +1148,16 @@ def generate_candidates(
     filtered = cands_before - len(cands)
     if filtered > 0:
         logging.info(f"Negative sentiment filter: Removed {filtered} keywords")
+    
+    # ==========================================================================
+    # Step 7.5: Stop-Phrase Filter
+    # ==========================================================================
+    # Discard meaningless keywords like "for abu dhabi", "how uae"
+    cands_before = len(cands)
+    cands = [c for c in cands if not is_stop_phrase(c)]
+    filtered = cands_before - len(cands)
+    if filtered > 0:
+        logging.info(f"Stop-phrase filter: Removed {filtered} keywords")
     
     # ==========================================================================
     # Step 8: Near Me Position Fix (Week 3 - Semantic Logic Gates)
