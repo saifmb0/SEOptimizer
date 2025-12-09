@@ -14,6 +14,15 @@ provider: none
 output: keywords.json
 save_csv: null
 verbose: false
+
+# Quality Assurance settings
+qa:
+  # Minimum words per keyword (1-2 word keywords are often too broad/competitive)
+  min_word_count: 3
+  max_word_count: 6
+  min_opportunity_score: 0.0
+  min_relative_interest: 0.0
+
 nlp:
   ngram_min_df: 2
   top_terms_per_doc: 10
