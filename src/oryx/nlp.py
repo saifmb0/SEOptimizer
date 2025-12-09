@@ -11,6 +11,20 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from .stopwords import get_stopwords, EN_STOPWORDS, AR_STOPWORDS
 
 # =============================================================================
+# Stemming Deduplicator
+# =============================================================================
+# Uses NLTK's Porter Stemmer to deduplicate near-identical keywords
+# e.g., "construction" and "constructions" -> keep higher-volume one
+
+try:
+    from nltk.stem import PorterStemmer
+    _stemmer = PorterStemmer()
+    HAS_STEMMER = True
+except ImportError:
+    _stemmer = None
+    HAS_STEMMER = False
+
+# =============================================================================
 # Sentence Tokenization (Strict Boundary Detection)
 # =============================================================================
 # Use NLTK's sentence tokenizer to prevent merging of unrelated content.
@@ -177,6 +191,80 @@ NEGATIVE_SENTIMENT_TERMS = frozenset({
     "failed", "failure", "failures",
     "bankrupt", "bankruptcy",
 })
+
+# Synonym groups to canonicalize (first in list is canonical)
+SYNONYM_GROUPS = [
+    ["best", "top", "leading", "premier"],
+    ["cost", "price", "pricing", "rates"],
+    ["company", "companies", "firm", "firms"],
+    ["service", "services"],
+]
+
+
+def _stem_phrase(phrase: str) -> str:
+    """
+    Stem all words in a phrase for comparison.
+    
+    Args:
+        phrase: Keyword phrase to stem
+        
+    Returns:
+        Stemmed version of phrase
+    """
+    if not HAS_STEMMER or not _stemmer:
+        return phrase.lower()
+    
+    words = phrase.lower().split()
+    return " ".join(_stemmer.stem(w) for w in words)
+
+
+def deduplicate_by_stemming(
+    keywords: List[str],
+    scores: Optional[Dict[str, float]] = None,
+) -> List[str]:
+    """
+    Deduplicate keywords by stemming, keeping the highest-scored variant.
+    
+    Addresses keyword cannibalization by collapsing near-identical phrases:
+    - "best villa construction" and "best villa constructions" -> keep one
+    - "top contractors" and "best contractors" -> keep highest scored
+    
+    Args:
+        keywords: List of keyword strings
+        scores: Optional dict of keyword -> score (for tie-breaking)
+        
+    Returns:
+        Deduplicated list of keywords
+    """
+    if not keywords:
+        return []
+    
+    scores = scores or {}
+    
+    # Group keywords by their stemmed form
+    stem_groups: Dict[str, List[str]] = {}
+    for kw in keywords:
+        stemmed = _stem_phrase(kw)
+        stem_groups.setdefault(stemmed, []).append(kw)
+    
+    # For each group, keep the highest-scored keyword
+    # If no scores, prefer shorter keywords (more natural)
+    result = []
+    for stemmed, variants in stem_groups.items():
+        if len(variants) == 1:
+            result.append(variants[0])
+        else:
+            # Sort by score (desc), then by length (asc, shorter is better)
+            best = max(variants, key=lambda k: (scores.get(k, 0), -len(k)))
+            result.append(best)
+            if len(variants) > 1:
+                logging.debug(f"Dedup: Kept '{best}' from variants: {variants}")
+    
+    deduped = len(keywords) - len(result)
+    if deduped > 0:
+        logging.info(f"Stemming deduplication: Merged {deduped} near-duplicate keywords")
+    
+    return result
 
 
 def contains_negative_sentiment(keyword: str) -> bool:
@@ -1029,4 +1117,10 @@ def generate_candidates(
             if fixed:
                 fixed_cands.append(fixed)
     
-    return list(dict.fromkeys(fixed_cands))
+    # ==========================================================================
+    # Step 9: Stemming Deduplication (Cannibalization Prevention)
+    # ==========================================================================
+    # Merge near-identical keywords like "construction" vs "constructions"
+    fixed_cands = deduplicate_by_stemming(list(dict.fromkeys(fixed_cands)))
+    
+    return fixed_cands
