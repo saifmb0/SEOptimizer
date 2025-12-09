@@ -1,4 +1,4 @@
-# Pre-commit hooks for keyword-lab
+# Pre-commit hooks for ORYX
 # Install: pre-commit install
 # Run manually: pre-commit run --all-files
 

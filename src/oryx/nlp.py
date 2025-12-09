@@ -11,6 +11,109 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from .stopwords import get_stopwords, EN_STOPWORDS, AR_STOPWORDS
 
 # =============================================================================
+# Protected Proper Nouns (Multi-word entities that should not be split)
+# =============================================================================
+# These multi-word names are treated as single tokens to prevent truncation
+# e.g., "Abu Dhabi" should not become just "abu" or "dhabi"
+
+PROTECTED_PROPER_NOUNS = [
+    # UAE Emirates
+    "abu dhabi",
+    "ras al khaimah",
+    "umm al quwain",
+    # Abu Dhabi areas
+    "al reem island",
+    "yas island",
+    "saadiyat island",
+    "khalifa city",
+    "mohamed bin zayed city",
+    "al ain",
+    "al maryah island",
+    # Dubai areas
+    "palm jumeirah",
+    "dubai marina",
+    "business bay",
+    "downtown dubai",
+    "jumeirah beach residence",
+    "jumeirah lake towers",
+    # Common multi-word terms
+    "near me",
+    "fit out",
+    "turn key",
+    "real estate",
+]
+
+# Pre-compile regex for performance
+_PROPER_NOUN_PATTERN = None
+
+
+def _get_proper_noun_pattern() -> re.Pattern:
+    """Get compiled regex pattern for proper noun protection."""
+    global _PROPER_NOUN_PATTERN
+    if _PROPER_NOUN_PATTERN is None:
+        # Sort by length descending to match longer phrases first
+        sorted_nouns = sorted(PROTECTED_PROPER_NOUNS, key=len, reverse=True)
+        pattern = "|".join(re.escape(noun) for noun in sorted_nouns)
+        _PROPER_NOUN_PATTERN = re.compile(f"({pattern})", re.IGNORECASE)
+    return _PROPER_NOUN_PATTERN
+
+
+def protect_proper_nouns(text: str) -> str:
+    """
+    Protect multi-word proper nouns by replacing spaces with underscores.
+    
+    This prevents tokenizers from splitting "Abu Dhabi" into separate words.
+    
+    Args:
+        text: Input text
+        
+    Returns:
+        Text with proper nouns protected (spaces replaced with underscores)
+    """
+    pattern = _get_proper_noun_pattern()
+    
+    def replace_spaces(match):
+        return match.group(0).replace(" ", "_")
+    
+    return pattern.sub(replace_spaces, text)
+
+
+def restore_proper_nouns(text: str) -> str:
+    """
+    Restore proper nouns by replacing underscores with spaces.
+    
+    Reverses the protection applied by protect_proper_nouns().
+    
+    Args:
+        text: Text with protected proper nouns
+        
+    Returns:
+        Text with underscores restored to spaces in proper nouns
+    """
+    # Only restore underscores that are part of known proper nouns
+    for noun in PROTECTED_PROPER_NOUNS:
+        protected = noun.replace(" ", "_")
+        if protected in text.lower():
+            # Case-insensitive replacement
+            text = re.sub(re.escape(protected), noun, text, flags=re.IGNORECASE)
+    return text
+
+
+# =============================================================================
+# Stemming Deduplicator
+# =============================================================================
+# Uses NLTK's Porter Stemmer to deduplicate near-identical keywords
+# e.g., "construction" and "constructions" -> keep higher-volume one
+
+try:
+    from nltk.stem import PorterStemmer
+    _stemmer = PorterStemmer()
+    HAS_STEMMER = True
+except ImportError:
+    _stemmer = None
+    HAS_STEMMER = False
+
+# =============================================================================
 # Sentence Tokenization (Strict Boundary Detection)
 # =============================================================================
 # Use NLTK's sentence tokenizer to prevent merging of unrelated content.
@@ -134,6 +237,12 @@ VALID_START_EXCEPTIONS = frozenset({
     "for",  # "for beginners", "for professionals"
 })
 
+# Words that CANNOT start a keyword - always grammatically invalid
+# "vs villa construction" is broken - "vs" requires a preceding noun
+INVALID_START_PREFIXES = frozenset({
+    "vs", "versus", "or", "and", "but", "nor", "yet",
+})
+
 # Words that must be followed by meaningful content (not just geo codes)
 REQUIRES_CONTENT_AFTER = frozenset({
     "vs", "versus", "or", "and",
@@ -144,10 +253,93 @@ MAX_NOUN_CLUSTER_SIZE = 3
 
 # Minimum meaningful words (non-stopwords, non-geo) for phrases starting with certain words
 MIN_MEANINGFUL_WORDS_FOR_VS = 2  # "vs" needs at least 2 meaningful words after it
-GEO_TOKENS = frozenset({"uae", "dubai", "abu", "dhabi", "sharjah", "ae", "en", "ar", "ajman", "fujairah"})
+GEO_TOKENS = frozenset({"uae", "dubai", "abu", "dhabi", "sharjah", "ae", "en", "ar", "ajman", "fujairah", "khaimah", "ras"})
 
 # Common stopwords that don't count as meaningful
 COMMON_STOPWORDS = frozenset({"the", "a", "an", "is", "are", "was", "were", "be", "been", "being"})
+
+# =============================================================================
+# Stop-Phrase Filter
+# =============================================================================
+# Keywords that consist ONLY of a prefix/stopword + geo are meaningless
+# e.g., "for abu dhabi", "in dubai", "how uae" should be discarded
+STOP_PHRASE_PREFIXES = frozenset({
+    "for", "in", "at", "on", "to", "from", "with", "by", "of",
+    "how", "what", "where", "when", "why", "which", "who",
+})
+
+
+def is_stop_phrase(keyword: str) -> bool:
+    """
+    Check if keyword is a meaningless stop-phrase.
+    
+    A stop-phrase is a keyword that consists only of:
+    - A prefix/stopword + geo tokens (e.g., "for abu dhabi", "in dubai")
+    - Question word + geo only (e.g., "how uae", "what dubai")
+    
+    Args:
+        keyword: The keyword to check
+        
+    Returns:
+        True if the keyword is a stop-phrase that should be discarded
+    """
+    words = keyword.lower().split()
+    if len(words) < 2:
+        return False
+    
+    first_word = words[0]
+    remaining = set(words[1:])
+    
+    # If first word is a stop-phrase prefix and ALL remaining words are geo tokens
+    if first_word in STOP_PHRASE_PREFIXES:
+        if remaining.issubset(GEO_TOKENS):
+            return True
+    
+    # Also check for patterns like "how to abu dhabi" (stopword + to + geo)
+    if len(words) >= 2:
+        meaningful = [w for w in words if w not in STOP_PHRASE_PREFIXES and w not in GEO_TOKENS and w not in {"to", "the", "a", "an"}]
+        if not meaningful:
+            return True
+    
+    return False
+
+
+# =============================================================================
+# Numeric Noise Filter
+# =============================================================================
+# Keywords that are mostly/entirely numbers are useless for SEO content
+# e.g., "971 50", "2024 2025", "10 12" should be discarded
+
+def is_numeric_noise(keyword: str) -> bool:
+    """
+    Check if keyword is numeric noise (mostly digits and spaces).
+    
+    Matches patterns like:
+    - "971 50" (phone number fragments)
+    - "2024 2025" (year spans)
+    - "10 12 15" (number sequences)
+    
+    Args:
+        keyword: The keyword to check
+        
+    Returns:
+        True if the keyword is numeric noise that should be discarded
+    """
+    # Remove all digits and spaces - if nothing remains, it's numeric noise
+    if re.fullmatch(r'[\d\s\-\.]+', keyword):
+        return True
+    
+    # Also reject if more than 50% of words are purely numeric
+    words = keyword.split()
+    if not words:
+        return False
+    
+    numeric_words = sum(1 for w in words if re.fullmatch(r'\d+', w))
+    if numeric_words / len(words) > 0.5:
+        return True
+    
+    return False
+
 
 # =============================================================================
 # Negative Sentiment Shield
@@ -172,6 +364,80 @@ NEGATIVE_SENTIMENT_TERMS = frozenset({
     "bankrupt", "bankruptcy",
 })
 
+# Synonym groups to canonicalize (first in list is canonical)
+SYNONYM_GROUPS = [
+    ["best", "top", "leading", "premier"],
+    ["cost", "price", "pricing", "rates"],
+    ["company", "companies", "firm", "firms"],
+    ["service", "services"],
+]
+
+
+def _stem_phrase(phrase: str) -> str:
+    """
+    Stem all words in a phrase for comparison.
+    
+    Args:
+        phrase: Keyword phrase to stem
+        
+    Returns:
+        Stemmed version of phrase
+    """
+    if not HAS_STEMMER or not _stemmer:
+        return phrase.lower()
+    
+    words = phrase.lower().split()
+    return " ".join(_stemmer.stem(w) for w in words)
+
+
+def deduplicate_by_stemming(
+    keywords: List[str],
+    scores: Optional[Dict[str, float]] = None,
+) -> List[str]:
+    """
+    Deduplicate keywords by stemming, keeping the highest-scored variant.
+    
+    Addresses keyword cannibalization by collapsing near-identical phrases:
+    - "best villa construction" and "best villa constructions" -> keep one
+    - "top contractors" and "best contractors" -> keep highest scored
+    
+    Args:
+        keywords: List of keyword strings
+        scores: Optional dict of keyword -> score (for tie-breaking)
+        
+    Returns:
+        Deduplicated list of keywords
+    """
+    if not keywords:
+        return []
+    
+    scores = scores or {}
+    
+    # Group keywords by their stemmed form
+    stem_groups: Dict[str, List[str]] = {}
+    for kw in keywords:
+        stemmed = _stem_phrase(kw)
+        stem_groups.setdefault(stemmed, []).append(kw)
+    
+    # For each group, keep the highest-scored keyword
+    # If no scores, prefer shorter keywords (more natural)
+    result = []
+    for stemmed, variants in stem_groups.items():
+        if len(variants) == 1:
+            result.append(variants[0])
+        else:
+            # Sort by score (desc), then by length (asc, shorter is better)
+            best = max(variants, key=lambda k: (scores.get(k, 0), -len(k)))
+            result.append(best)
+            if len(variants) > 1:
+                logging.debug(f"Dedup: Kept '{best}' from variants: {variants}")
+    
+    deduped = len(keywords) - len(result)
+    if deduped > 0:
+        logging.info(f"Stemming deduplication: Merged {deduped} near-duplicate keywords")
+    
+    return result
+
 
 def contains_negative_sentiment(keyword: str) -> bool:
     """
@@ -195,7 +461,7 @@ def is_grammatically_valid(keyword: str) -> bool:
     Check if a keyword phrase is grammatically valid.
     
     Uses SpaCy POS tagging to filter out nonsensical combinations:
-    - Rejects keywords starting with conjunctions (and, or, but)
+    - Rejects keywords starting with conjunctions (and, or, but, vs)
     - Rejects keywords starting with prepositions (unless idiom)
     - Rejects pure noun clusters with >3 nouns (Franken-keywords)
     
@@ -205,21 +471,31 @@ def is_grammatically_valid(keyword: str) -> bool:
     Returns:
         True if grammatically valid, False otherwise
     """
-    if not HAS_SPACY or not _nlp_spacy:
-        # If SpaCy not available, allow all (graceful degradation)
-        return True
-    
     keyword = keyword.strip().lower()
     if not keyword or len(keyword.split()) < 2:
         return True  # Single words pass through
     
-    # Check for valid start exceptions first
     first_word = keyword.split()[0]
+    
+    # =================================================================
+    # Rule 0: Hard-reject invalid starting prefixes
+    # =================================================================
+    # "vs villa construction" is broken - requires preceding noun
+    # "or villa construction" is broken - requires preceding clause
+    if first_word in INVALID_START_PREFIXES:
+        logging.debug(f"Grammar filter: '{keyword}' starts with invalid prefix '{first_word}'")
+        return False
+    
+    # Check for valid start exceptions first
     if first_word in VALID_START_EXCEPTIONS:
         return True
     
+    if not HAS_SPACY or not _nlp_spacy:
+        # If SpaCy not available, allow all (graceful degradation)
+        return True
+    
     # =================================================================
-    # Rule 0: Check for words that require meaningful content after
+    # Rule 1: Check for words that require meaningful content after
     # =================================================================
     # "vs managers uae" -> "vs" needs real content, not just 1 word + geo
     if first_word in REQUIRES_CONTENT_AFTER:
@@ -519,39 +795,61 @@ def tokenize(text: str, language: str = "en") -> List[str]:
 
 
 def ngram_counts(texts: List[str], ngram_range=(2, 3), min_df: int = 2) -> pd.DataFrame:
+    """
+    Count n-grams in a list of texts with proper noun protection.
+    
+    Protects multi-word proper nouns (e.g., "Abu Dhabi") from being split
+    during tokenization.
+    
+    IMPORTANT: Does NOT remove stopwords during vectorization to preserve
+    valid phrases like "step by step". Instead, filters out n-grams that
+    START or END with stopwords (e.g., "for the", "company in").
+    """
     if not texts:
-        return pd.DataFrame(columns=["ngram", "count"])    
-    n_docs = len(texts)
+        return pd.DataFrame(columns=["ngram", "count"])
+    
+    # Protect proper nouns before tokenization
+    protected_texts = [protect_proper_nouns(t) for t in texts]
+    
+    n_docs = len(protected_texts)
     eff_min_df = min_df if n_docs >= min_df else max(1, n_docs)
+    
+    # Generate n-grams WITHOUT removing stopwords first
+    # This preserves valid phrases like "step by step"
     try:
-        vectorizer = CountVectorizer(ngram_range=ngram_range, min_df=eff_min_df, stop_words="english")
-        X = vectorizer.fit_transform(texts)
+        vectorizer = CountVectorizer(ngram_range=ngram_range, min_df=eff_min_df, stop_words=None)
+        X = vectorizer.fit_transform(protected_texts)
     except ValueError:
         # Fallback for very small corpora
-        vectorizer = CountVectorizer(ngram_range=ngram_range, min_df=1, stop_words="english")
-        X = vectorizer.fit_transform(texts)
+        vectorizer = CountVectorizer(ngram_range=ngram_range, min_df=1, stop_words=None)
+        X = vectorizer.fit_transform(protected_texts)
     counts = np.asarray(X.sum(axis=0)).ravel()
     ngrams = vectorizer.get_feature_names_out()
-    df = pd.DataFrame({"ngram": ngrams, "count": counts})
+    
+    # Restore proper nouns in the output
+    restored_ngrams = [restore_proper_nouns(ng) for ng in ngrams]
+    
+    df = pd.DataFrame({"ngram": restored_ngrams, "count": counts})
+    
+    # Filter out n-grams that start or end with stopwords
+    # This prevents garbage like "for the", "in dubai" (preposition-only)
+    # but keeps valid phrases like "step by step", "villa in dubai"
+    stopwords = get_stopwords("en")
+    
+    def is_valid_ngram(ngram: str) -> bool:
+        words = ngram.lower().split()
+        if not words:
+            return False
+        # Reject if starts or ends with a stopword
+        if words[0] in stopwords or words[-1] in stopwords:
+            return False
+        return True
+    
+    df = df[df["ngram"].apply(is_valid_ngram)]
     df = df.sort_values("count", ascending=False)
     return df
 
 
-QUESTION_PREFIXES = [
-    "how", "what", "best", "vs", "for", "near me", "beginner", "advanced", "guide", "checklist", "template", "why"
-]
-
-# Alias for external access (can be overridden via config)
-DEFAULT_QUESTION_PREFIXES = QUESTION_PREFIXES.copy()
-
-# =============================================================================
-# Semantic Compatibility Rules for Question Generation
-# =============================================================================
-# These rules prevent logically nonsensical combinations like:
-# - "where to buy contracting company" (you hire, not buy companies)
-# - "near me near me warehouse" (duplicate modifiers)
-
-# Service-oriented terms that don't work with "buy" prefixes
 SERVICE_TERMS = frozenset({
     "company", "companies", "contractor", "contractors", 
     "service", "services", "agency", "agencies",
@@ -568,23 +866,6 @@ PRODUCT_TERMS = frozenset({
     "software", "hardware", "device", "devices",
 })
 
-# Prefixes that imply purchasing a product (not hiring a service)
-BUY_PREFIXES = frozenset({
-    "buy", "where to buy", "purchase", "order", "shop for",
-    "cheap", "discount", "for sale", "price of",
-})
-
-# Prefixes that imply hiring a service
-HIRE_PREFIXES = frozenset({
-    "hire", "find", "get quotes", "quotes for", "cost of",
-    "best", "top rated", "recommended",
-})
-
-# Local modifiers that shouldn't be duplicated
-LOCAL_MODIFIERS = frozenset({
-    "near me", "nearby", "local", "in my area",
-})
-
 
 class SeedType:
     """Classification of seed topics for semantic logic gates."""
@@ -596,11 +877,6 @@ class SeedType:
 def classify_seed_type(seed: str) -> str:
     """
     Classify a seed topic as Service, Product, or Unknown.
-    
-    This determines which keyword templates are appropriate:
-    - SERVICE: Use "hire", "quotes", "cost of". Ban "buy", "cheap".
-    - PRODUCT: Use "buy", "price", "reviews". 
-    - UNKNOWN: Use general templates.
     
     Args:
         seed: The seed topic/keyword
@@ -704,95 +980,48 @@ def is_near_me_valid(keyword: str) -> bool:
     return keyword_lower.endswith("near me")
 
 
-def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Optional[List[str]] = None) -> List[str]:
-    """
-    Generate question-style keywords from phrases with semantic logic gates.
-    
-    Applies compatibility rules to prevent nonsensical combinations:
-    - No "buy" prefixes for service companies (you hire, not buy)
-    - No duplicate local modifiers ("near me near me")
-    - No redundant question prefixes
-    
-    Args:
-        phrases: Source phrases to expand
-        top_n: Maximum number of phrases to process
-        prefixes: Optional custom prefixes (from config), defaults to QUESTION_PREFIXES
-        
-    Returns:
-        List of generated question keywords (semantically valid only)
-    """
-    question_prefixes = prefixes if prefixes is not None else QUESTION_PREFIXES
-    qs = []
-    
-    for p in list(phrases)[:top_n]:
-        if len(p.split()) < 2:
-            continue
-        
-        p_lower = p.lower()
-        p_tokens = set(p_lower.split())
-        
-        # Detect if phrase is about services (not products)
-        is_service_term = bool(p_tokens & SERVICE_TERMS)
-        
-        # Detect if phrase already has a local modifier
-        has_local_modifier = any(mod in p_lower for mod in LOCAL_MODIFIERS)
-        
-        for pref in question_prefixes:
-            pref_lower = pref.lower()
-            
-            # =================================================================
-            # RULE 1: Skip "buy" prefixes for service companies
-            # =================================================================
-            # "where to buy contracting company" is nonsensical
-            # Users HIRE contractors, they don't BUY the company
-            if pref_lower in BUY_PREFIXES and is_service_term:
-                continue
-            
-            # =================================================================
-            # RULE 2: Skip local modifiers if phrase already has one
-            # =================================================================
-            # Prevents "near me warehouse near me" duplication
-            if pref_lower in LOCAL_MODIFIERS and has_local_modifier:
-                continue
-            
-            # =================================================================
-            # RULE 3: Skip if prefix is already in the phrase
-            # =================================================================
-            # Prevents "best best contractors" or "how to how to"
-            if pref_lower in p_lower:
-                continue
-            
-            # =================================================================
-            # RULE 4: Handle "near me" positioning
-            # =================================================================
-            # "near me" must be a SUFFIX, not a prefix
-            # Transform "near me contractors" -> "contractors near me"
-            if pref_lower == "near me":
-                # Add as suffix instead of prefix
-                q = f"{p} near me".strip()
-            else:
-                q = f"{pref} {p}".strip()
-            
-            if len(q.split()) >= 2:
-                qs.append(q)
-    
-    # Post-process: filter out any keywords with invalid near-me positioning
-    qs = [q for q in qs if is_near_me_valid(q)]
-    
-    return qs
-
 
 def tfidf_top_terms_per_doc(texts: List[str], ngram_range=(2, 3), top_k: int = 10) -> List[str]:
+    """
+    Extract top TF-IDF terms per document with proper noun protection.
+    
+    Protects multi-word proper nouns from being split during tokenization.
+    Does NOT remove stopwords during vectorization to preserve valid phrases.
+    Filters out n-grams that start/end with stopwords afterward.
+    """
     if not texts:
         return []
-    vec = TfidfVectorizer(ngram_range=ngram_range, stop_words="english")
-    X = vec.fit_transform(texts)
+    
+    # Protect proper nouns before tokenization
+    protected_texts = [protect_proper_nouns(t) for t in texts]
+    
+    # Don't remove stopwords during vectorization - filter afterward
+    vec = TfidfVectorizer(ngram_range=ngram_range, stop_words=None)
+    X = vec.fit_transform(protected_texts)
     terms = vec.get_feature_names_out()
+    
     tops: List[str] = []
     for i in range(X.shape[0]):
         row = X.getrow(i).toarray().ravel()
-        idx = np.argsort(-row)[:top_k]
+        idx = np.argsort(-row)[:top_k * 2]  # Get extra to account for filtering
         tops.extend([terms[j] for j in idx if row[j] > 0])
+    
+    # Restore proper nouns in the output
+    tops = [restore_proper_nouns(t) for t in tops]
+    
+    # Filter out n-grams that start/end with stopwords
+    stopwords = get_stopwords("en")
+    
+    def is_valid_ngram(ngram: str) -> bool:
+        words = ngram.lower().split()
+        if not words:
+            return False
+        if words[0] in stopwords or words[-1] in stopwords:
+            return False
+        return True
+    
+    tops = [t for t in tops if is_valid_ngram(t)]
+    
     return list(dict.fromkeys(tops))
 
 
@@ -887,28 +1116,28 @@ def generate_candidates(
     docs: List[Dict], 
     ngram_min_df: int = 2, 
     top_terms_per_doc: int = 10,
-    question_prefixes: Optional[List[str]] = None,
     language: str = "en",
 ) -> List[str]:
     """
-    Generate keyword candidates with strict sentence boundary detection.
+    Extract keyword candidates from documents using EXTRACTION ONLY.
     
-    Uses NLTK sentence tokenization to ensure proper boundaries:
-    - "Contact Us" never merges with content paragraphs
-    - Footer links stay isolated from main content
-    - Navigation elements don't contaminate keywords
+    This function uses NLTK sentence tokenization to ensure proper boundaries
+    and extracts ONLY what exists in the source material:
+    - N-grams that actually appear in documents
+    - TF-IDF significant terms
     
-    The key insight: n-grams should NEVER cross sentence/line boundaries.
+    NO heuristic question generation - real questions should come from:
+    - LLM generation (understands grammar)
+    - PAA/Related Searches from Google/Bing (verified real queries)
     
     Args:
         docs: List of document dicts with 'text' field
         ngram_min_df: Minimum document frequency for ngrams
         top_terms_per_doc: Number of top TF-IDF terms per document
-        question_prefixes: Optional custom question prefixes (from config)
         language: Language code for sentence tokenization
         
     Returns:
-        List of candidate keywords (filtered for scraping artifacts)
+        List of candidate keywords (extracted from real text only)
     """
     # ==========================================================================
     # Step 1: Sentence Tokenization with Strict Boundaries
@@ -943,19 +1172,17 @@ def generate_candidates(
     ngram_list = counts_df["ngram"].tolist()
     
     # ==========================================================================
-    # Step 3: Smart Question Generation
+    # Step 3: EXTRACTION ONLY - No Heuristic Question Generation
     # ==========================================================================
-    # Filter artifacts BEFORE generating questions to prevent
-    # "where to buy en ae" type nonsense
-    
-    questions = []
-    if ngram_list:
-        clean_ngrams = filter_scraping_artifacts(ngram_list)
-        questions = generate_questions(
-            clean_ngrams, 
-            top_n=min(50, len(clean_ngrams)), 
-            prefixes=question_prefixes
-        )
+    # REMOVED: generate_questions() call that was producing garbage like
+    # "how construction company" by blindly smashing prefixes onto n-grams.
+    # 
+    # Real questions should come from:
+    # - LLM generation (understands grammar)
+    # - PAA/Related Searches from Google/Bing (verified real queries)
+    # - Actual question phrases extracted from document text
+    #
+    # We now trust ONLY what exists in the source material.
     
     # ==========================================================================
     # Step 4: TF-IDF on reconstructed docs with sentence boundaries
@@ -974,9 +1201,9 @@ def generate_candidates(
     tfidf_terms = tfidf_top_terms_per_doc(reconstructed_docs, top_k=top_terms_per_doc)
     
     # ==========================================================================
-    # Step 5: Combine and filter
+    # Step 5: Combine and filter (EXTRACTION ONLY - no synthesized questions)
     # ==========================================================================
-    cands = list(dict.fromkeys([*ngram_list, *questions, *tfidf_terms]))
+    cands = list(dict.fromkeys([*ngram_list, *tfidf_terms]))
     cands = [c.strip().lower() for c in cands if len(c.split()) >= 2]
     
     # Filter scraping artifacts
@@ -1000,6 +1227,26 @@ def generate_candidates(
         logging.info(f"Negative sentiment filter: Removed {filtered} keywords")
     
     # ==========================================================================
+    # Step 7.5: Stop-Phrase Filter
+    # ==========================================================================
+    # Discard meaningless keywords like "for abu dhabi", "how uae"
+    cands_before = len(cands)
+    cands = [c for c in cands if not is_stop_phrase(c)]
+    filtered = cands_before - len(cands)
+    if filtered > 0:
+        logging.info(f"Stop-phrase filter: Removed {filtered} keywords")
+    
+    # ==========================================================================
+    # Step 7.6: Numeric Noise Filter
+    # ==========================================================================
+    # Discard keywords that are mostly/entirely numbers (e.g., "971 50")
+    cands_before = len(cands)
+    cands = [c for c in cands if not is_numeric_noise(c)]
+    filtered = cands_before - len(cands)
+    if filtered > 0:
+        logging.info(f"Numeric noise filter: Removed {filtered} keywords")
+    
+    # ==========================================================================
     # Step 8: Near Me Position Fix (Week 3 - Semantic Logic Gates)
     # ==========================================================================
     # Fix or reject keywords with "near me" in wrong position
@@ -1013,4 +1260,10 @@ def generate_candidates(
             if fixed:
                 fixed_cands.append(fixed)
     
-    return list(dict.fromkeys(fixed_cands))
+    # ==========================================================================
+    # Step 9: Stemming Deduplication (Cannibalization Prevention)
+    # ==========================================================================
+    # Merge near-identical keywords like "construction" vs "constructions"
+    fixed_cands = deduplicate_by_stemming(list(dict.fromkeys(fixed_cands)))
+    
+    return fixed_cands

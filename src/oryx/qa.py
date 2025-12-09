@@ -1,5 +1,5 @@
 """
-QA Validation Module for Keyword Lab.
+QA Validation Module for ORYX.
 
 Provides quality assurance functions to validate and clean keyword clusters:
 - Discard clusters with fewer than minimum keywords
@@ -18,7 +18,7 @@ DEFAULT_MIN_CLUSTER_SIZE = 3
 DEFAULT_MAX_WORD_COUNT = 6
 DEFAULT_MIN_WORD_COUNT = 2
 DEFAULT_MIN_OPPORTUNITY_SCORE = 0.0
-DEFAULT_MIN_SEARCH_VOLUME = 0.0
+DEFAULT_MIN_RELATIVE_INTEREST = 0.0
 
 
 def validate_keyword_length(
@@ -131,7 +131,7 @@ def validate_pipeline_output(
     max_word_count: int = DEFAULT_MAX_WORD_COUNT,
     min_word_count: int = DEFAULT_MIN_WORD_COUNT,
     min_opportunity_score: float = DEFAULT_MIN_OPPORTUNITY_SCORE,
-    min_search_volume: float = DEFAULT_MIN_SEARCH_VOLUME,
+    min_relative_interest: float = DEFAULT_MIN_RELATIVE_INTEREST,
 ) -> Tuple[List[Dict], Dict[str, Any]]:
     """
     Validate and filter pipeline output items.
@@ -147,7 +147,7 @@ def validate_pipeline_output(
         max_word_count: Maximum words per keyword
         min_word_count: Minimum words per keyword
         min_opportunity_score: Minimum opportunity score (0-1)
-        min_search_volume: Minimum search volume score (0-1)
+        min_relative_interest: Minimum relative interest score (0-1)
         
     Returns:
         Tuple of (validated_items, qa_report)
@@ -172,17 +172,17 @@ def validate_pipeline_output(
     
     for item in length_filtered:
         opp_score = item.get("opportunity_score", 0.0)
-        search_vol = item.get("search_volume", 0.0)
+        rel_interest = item.get("relative_interest", 0.0)
         
         if opp_score < min_opportunity_score:
             score_rejected.append({
                 "item": item, 
                 "reason": f"Low opportunity: {opp_score:.2f} < {min_opportunity_score}"
             })
-        elif search_vol < min_search_volume:
+        elif rel_interest < min_relative_interest:
             score_rejected.append({
                 "item": item, 
-                "reason": f"Low search volume: {search_vol:.2f} < {min_search_volume}"
+                "reason": f"Low relative interest: {rel_interest:.2f} < {min_relative_interest}"
             })
         else:
             score_filtered.append(item)
@@ -221,7 +221,7 @@ def validate_pipeline_output(
             "max_word_count": max_word_count,
             "min_word_count": min_word_count,
             "min_opportunity_score": min_opportunity_score,
-            "min_search_volume": min_search_volume,
+            "min_relative_interest": min_relative_interest,
         },
         "details": {
             "length_rejected": length_rejected[:10],  # Limit detail output
@@ -262,7 +262,7 @@ def run_qa_validation(
         max_word_count=int(qa_cfg.get("max_word_count", DEFAULT_MAX_WORD_COUNT)),
         min_word_count=int(qa_cfg.get("min_word_count", DEFAULT_MIN_WORD_COUNT)),
         min_opportunity_score=float(qa_cfg.get("min_opportunity_score", DEFAULT_MIN_OPPORTUNITY_SCORE)),
-        min_search_volume=float(qa_cfg.get("min_search_volume", DEFAULT_MIN_SEARCH_VOLUME)),
+        min_relative_interest=float(qa_cfg.get("min_relative_interest", DEFAULT_MIN_RELATIVE_INTEREST)),
     )
 
 

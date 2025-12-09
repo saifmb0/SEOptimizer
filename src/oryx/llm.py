@@ -36,6 +36,51 @@ GEO_INTENT_CATEGORIES = {
     "comparative": "Queries comparing options or seeking recommendations (e.g., 'best crm for small business')",
 }
 
+# =============================================================================
+# Stopwords for Smart Topic Fallback
+# =============================================================================
+# Words that should never be used as parent topics when falling back
+TOPIC_STOPWORDS = frozenset({
+    # Prepositions
+    "for", "in", "at", "on", "to", "from", "with", "by", "of", "about",
+    # Articles
+    "a", "an", "the",
+    # Question words
+    "how", "what", "where", "when", "why", "which", "who",
+    # Common verbs
+    "is", "are", "was", "were", "be", "do", "does", "did",
+    # Other stopwords
+    "and", "or", "but", "so", "if", "as", "than",
+})
+
+
+def _smart_topic_fallback(keyword: str) -> str:
+    """
+    Extract a meaningful topic from a keyword when LLM is unavailable.
+    
+    Skips stopwords to avoid garbage parent topics like "for", "how", "in".
+    
+    Args:
+        keyword: The keyword to extract a topic from
+        
+    Returns:
+        First meaningful (non-stopword) word, or the full phrase if all stopwords
+    """
+    words = keyword.lower().split()
+    if not words:
+        return keyword
+    
+    # Find first non-stopword word
+    for word in words:
+        if word not in TOPIC_STOPWORDS and len(word) > 2:
+            return word
+    
+    # If all words are stopwords, return first two words as phrase
+    if len(words) >= 2:
+        return " ".join(words[:2])
+    
+    return words[0]
+
 
 # =============================================================================
 # Locale-Specific Terminology for LLM Prompts
@@ -669,13 +714,13 @@ def assign_parent_topics(
         return {}
     
     if provider == "none":
-        return {kw: kw.split()[0] for kw in keywords}  # Use first word as topic
+        return {kw: _smart_topic_fallback(kw) for kw in keywords}
     
     # Auto-detect provider
     if provider == "auto":
         provider = _detect_provider()
         if provider is None:
-            return {kw: kw.split()[0] for kw in keywords}
+            return {kw: _smart_topic_fallback(kw) for kw in keywords}
     
     keyword_list = "\n".join(f"- {kw}" for kw in keywords[:100])
     
@@ -722,11 +767,11 @@ No additional text."""
                     if isinstance(topic, str) and topic.strip():
                         topics[kw] = topic.strip().lower()
                     else:
-                        topics[kw] = kw.split()[0]
+                        topics[kw] = _smart_topic_fallback(kw)
                 logging.info(f"Assigned {len(set(topics.values()))} parent topics to {len(topics)} keywords")
                 return topics
     except Exception as e:
         logging.debug(f"Parent topic assignment failed: {e}")
     
     # Fallback
-    return {kw: kw.split()[0] for kw in keywords}
+    return {kw: _smart_topic_fallback(kw) for kw in keywords}

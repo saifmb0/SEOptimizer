@@ -365,6 +365,46 @@ def get_bilingual_suggestions(
     return results
 
 
+def _is_valid_autocomplete_match(keyword: str, suggestion: str) -> bool:
+    """
+    Check if a keyword validly matches an autocomplete suggestion.
+    
+    Uses strict matching to avoid false positives:
+    - Exact match: keyword == suggestion
+    - Prefix match: suggestion starts with keyword + space
+    - Contained match: keyword appears as complete words in suggestion
+    
+    This prevents "how abu dhabi" from matching "how to build in abu dhabi"
+    just because it's a substring.
+    
+    Args:
+        keyword: The keyword to validate (lowercase)
+        suggestion: The autocomplete suggestion (lowercase)
+        
+    Returns:
+        True if the match is valid
+    """
+    keyword = keyword.strip().lower()
+    suggestion = suggestion.strip().lower()
+    
+    # Exact match
+    if keyword == suggestion:
+        return True
+    
+    # Suggestion starts with keyword (keyword is a valid search prefix)
+    if suggestion.startswith(keyword + " "):
+        return True
+    
+    # Keyword appears as complete phrase in suggestion (word boundaries)
+    # e.g., "villa construction" in "best villa construction dubai"
+    import re
+    pattern = r'\b' + re.escape(keyword) + r'\b'
+    if re.search(pattern, suggestion):
+        return True
+    
+    return False
+
+
 def validate_keywords_with_autocomplete(
     keywords: List[str],
     language: str = "en",
@@ -409,14 +449,15 @@ def validate_keywords_with_autocomplete(
             # Check both languages for bilingual markets
             bilingual_results = get_bilingual_suggestions(prefix, country_lower)
             for lang, suggestions in bilingual_results.items():
-                if any(kw_lower in s or s in kw_lower for s in suggestions):
+                # Strict match: keyword must exactly match or be the start of a suggestion
+                if any(_is_valid_autocomplete_match(kw_lower, s) for s in suggestions):
                     is_validated = True
                     break
         else:
-            # Standard single-language check
+            # Standard single-language check - strict matching
             suggestions = get_google_suggestions(prefix, language, country)
             is_validated = any(
-                kw_lower in s or s in kw_lower 
+                _is_valid_autocomplete_match(kw_lower, s)
                 for s in suggestions
             )
         
@@ -955,6 +996,96 @@ def parse_sitemap(sitemap_url: str, timeout: int = 15, user_agent: str = DEFAULT
     return urls
 
 
+def crawl_competitor_sitemaps(
+    competitor_domains: List[str],
+    path_filters: Optional[List[str]] = None,
+    max_pages_per_domain: int = 50,
+    timeout: int = 15,
+    user_agent: str = DEFAULT_UA,
+) -> List[str]:
+    """
+    Crawl competitor sitemaps to discover all their pages.
+    
+    This is the "Hunter" feature that automatically finds competitor content
+    without requiring manual URL collection.
+    
+    Args:
+        competitor_domains: List of competitor domains (e.g., ['competitor.ae', 'example.com'])
+        path_filters: Optional list of path patterns to filter (e.g., ['/services/', '/blog/'])
+            If None, includes all pages
+        max_pages_per_domain: Maximum pages to extract per domain
+        timeout: Request timeout
+        user_agent: User agent string
+        
+    Returns:
+        List of discovered URLs
+        
+    Example:
+        >>> urls = crawl_competitor_sitemaps(
+        ...     ['competitor.ae'],
+        ...     path_filters=['/services/', '/projects/']
+        ... )
+    """
+    all_urls: List[str] = []
+    
+    for domain in competitor_domains:
+        # Normalize domain
+        domain = domain.strip().lower()
+        if not domain:
+            continue
+            
+        # Remove protocol if present
+        if domain.startswith("http://"):
+            domain = domain[7:]
+        elif domain.startswith("https://"):
+            domain = domain[8:]
+        
+        # Remove trailing slash
+        domain = domain.rstrip("/")
+        
+        # Try common sitemap locations
+        sitemap_urls = [
+            f"https://{domain}/sitemap.xml",
+            f"https://{domain}/sitemap_index.xml",
+            f"https://{domain}/sitemap-index.xml",
+            f"https://{domain}/sitemaps/sitemap.xml",
+        ]
+        
+        domain_urls: List[str] = []
+        for sitemap_url in sitemap_urls:
+            urls = parse_sitemap(sitemap_url, timeout=timeout, user_agent=user_agent)
+            if urls:
+                logging.info(f"Found sitemap for {domain} at {sitemap_url}")
+                domain_urls.extend(urls)
+                break  # Found a working sitemap, stop trying others
+        
+        if not domain_urls:
+            logging.warning(f"No sitemap found for {domain}. Consider adding robots.txt parsing.")
+            continue
+        
+        # Apply path filters if specified
+        if path_filters:
+            filtered_urls = []
+            for url in domain_urls:
+                for pattern in path_filters:
+                    if pattern.lower() in url.lower():
+                        filtered_urls.append(url)
+                        break
+            domain_urls = filtered_urls
+            logging.info(f"Filtered to {len(domain_urls)} URLs matching patterns: {path_filters}")
+        
+        # Limit pages per domain
+        if len(domain_urls) > max_pages_per_domain:
+            logging.info(f"Limiting {domain} from {len(domain_urls)} to {max_pages_per_domain} pages")
+            domain_urls = domain_urls[:max_pages_per_domain]
+        
+        all_urls.extend(domain_urls)
+        logging.info(f"Discovered {len(domain_urls)} pages from {domain}")
+    
+    logging.info(f"Total competitor pages discovered: {len(all_urls)}")
+    return all_urls
+
+
 def read_local_sources(path: str) -> List[Document]:
     import pathlib
 
@@ -1156,6 +1287,56 @@ def _bing_search(query: str, api_key: str, max_results: int = 10) -> List[Dict]:
         return []
 
 
+# Try to import duckduckgo_search for free, no-API-key searching
+try:
+    from duckduckgo_search import DDGS
+    HAS_DUCKDUCKGO = True
+except ImportError:
+    HAS_DUCKDUCKGO = False
+    DDGS = None
+
+
+def _free_search(query: str, max_results: int = 10, region: str = "wt-wt") -> List[Dict]:
+    """
+    Free search using DuckDuckGo (no API key required).
+    
+    This is slower and less reliable than paid APIs, but allows
+    zero-config operation for casual users.
+    
+    Args:
+        query: Search query string
+        max_results: Maximum results to return
+        region: DuckDuckGo region code (wt-wt = worldwide, ae-ar = UAE Arabic)
+        
+    Returns:
+        List of search results with title, url, snippet
+    """
+    if not HAS_DUCKDUCKGO:
+        logging.warning(
+            "duckduckgo_search not installed. Install with: pip install duckduckgo_search"
+        )
+        return []
+    
+    try:
+        with DDGS() as ddgs:
+            raw_results = list(ddgs.text(query, region=region, max_results=max_results))
+        
+        results = []
+        for item in raw_results[:max_results]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("href", ""),
+                "snippet": item.get("body", ""),
+                "total_results": None,  # DuckDuckGo doesn't provide total count
+            })
+        
+        logging.info(f"DuckDuckGo search returned {len(results)} results for '{query}'")
+        return results
+    except Exception as e:
+        logging.warning(f"DuckDuckGo search failed: {e}")
+        return []
+
+
 def acquire_documents(
     sources: Optional[str],
     query: Optional[str],
@@ -1167,6 +1348,7 @@ def acquire_documents(
     dry_run: bool = False,
     use_cache: bool = True,
     cache_dir: str = DEFAULT_CACHE_DIR,
+    geo: str = "wt-wt",
 ) -> List[Document]:
     """
     Acquire documents from various sources.
@@ -1174,7 +1356,12 @@ def acquire_documents(
     Args:
         sources: Path to local sources (file or directory)
         query: Search query for SERP providers
-        provider: SERP provider (none, serpapi, bing)
+        provider: SERP provider (none, auto, serpapi, bing, free)
+            - none: Only use local sources
+            - auto: Try serpapi > bing > free (based on available keys)
+            - serpapi: Use SerpAPI (requires SERPAPI_KEY)
+            - bing: Use Bing API (requires BING_API_KEY)
+            - free: Use DuckDuckGo (no key, but slower/rate-limited)
         max_serp_results: Maximum results from SERP
         timeout: Request timeout
         retries: Number of retries
@@ -1182,6 +1369,7 @@ def acquire_documents(
         dry_run: If True, skip network calls
         use_cache: Enable URL caching (requires joblib)
         cache_dir: Directory for cache storage
+        geo: Region code for free search (default: wt-wt worldwide)
         
     Returns:
         List of Document objects
@@ -1212,18 +1400,41 @@ def acquire_documents(
     # Provider SERP acquisition
     if provider and provider != "none" and query:
         results: List[Dict] = []
-        if provider == "serpapi":
+        
+        # Auto-detect best available provider
+        effective_provider = provider
+        if provider == "auto":
+            serpapi_key = os.getenv("SERPAPI_KEY", "")
+            bing_key = os.getenv("BING_API_KEY", "")
+            if serpapi_key:
+                effective_provider = "serpapi"
+                logging.info("Auto-detected provider: serpapi")
+            elif bing_key:
+                effective_provider = "bing"
+                logging.info("Auto-detected provider: bing")
+            elif HAS_DUCKDUCKGO:
+                effective_provider = "free"
+                logging.info("Auto-detected provider: free (DuckDuckGo)")
+            else:
+                logging.warning("No SERP provider available. Set SERPAPI_KEY or install duckduckgo_search.")
+                effective_provider = "none"
+        
+        # Execute search based on provider
+        if effective_provider == "serpapi":
             key = os.getenv("SERPAPI_KEY", "")
             if key:
                 results = _serpapi_search(query, key, max_results=max_serp_results)
             else:
                 logging.info("SERPAPI_KEY not set; skipping provider fetch")
-        elif provider == "bing":
+        elif effective_provider == "bing":
             key = os.getenv("BING_API_KEY", "")
             if key:
                 results = _bing_search(query, key, max_results=max_serp_results)
             else:
                 logging.info("BING_API_KEY not set; skipping provider fetch")
+        elif effective_provider == "free":
+            results = _free_search(query, max_results=max_serp_results, region=geo)
+        
         # Fetch each result URL (with caching)
         for r in results:
             url = r.get("url")

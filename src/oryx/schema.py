@@ -1,5 +1,5 @@
 """
-Keyword data schema validation for ORYX (Keyword Lab).
+Keyword data schema validation for ORYX.
 
 Uses Pydantic V2 for strict validation with type coercion and custom validators.
 """
@@ -60,7 +60,7 @@ class KeywordData(BaseModel):
     funnel_stage: FunnelStage = Field(default=FunnelStage.TOFU, description="Marketing funnel stage")
     
     # Metrics (with validation bounds)
-    search_volume: float = Field(default=0, ge=0, description="Monthly search volume")
+    relative_interest: float = Field(default=0, ge=0, le=1, description="Relative interest score (0-1, NOT absolute search volume)")
     difficulty: float = Field(default=0.5, ge=0, le=1, description="Keyword difficulty (0-1)")
     ctr_potential: float = Field(default=0.5, ge=0, le=1, description="CTR potential (0-1)")
     opportunity_score: float = Field(default=0.5, ge=0, le=1, description="Opportunity score (0-1)")
@@ -211,7 +211,7 @@ COMPACT_SCHEMA = {
             "parent_topic": {"type": "string"},
             "intent": {"type": "string"},
             "funnel_stage": {"type": "string", "enum": ["TOFU", "MOFU", "BOFU"]},
-            "search_volume": {"type": "number", "minimum": 0},
+            "relative_interest": {"type": "number", "minimum": 0, "maximum": 1},
             "difficulty": {"type": "number", "minimum": 0, "maximum": 1},
             "ctr_potential": {"type": "number", "minimum": 0, "maximum": 1},
             "serp_features": {"type": "array", "items": {"type": "string"}},

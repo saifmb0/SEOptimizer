@@ -8,3 +8,4 @@ keywords.json
 *.csv
 .vscode/
 *.egg-info/
+data/

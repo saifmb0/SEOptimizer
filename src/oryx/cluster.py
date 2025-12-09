@@ -11,7 +11,7 @@ try:
 except ImportError:
     HAS_ST = False
     logging.debug(
-        "sentence-transformers not installed. Install with: pip install keyword-lab[ml]. "
+        "sentence-transformers not installed. Install with: pip install oryx[ml]. "
         "Falling back to TF-IDF vectorization."
     )
 

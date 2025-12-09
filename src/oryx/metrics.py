@@ -676,7 +676,7 @@ def compute_metrics(
         serp_features = estimate_serp_features(k, intent)
         
         metrics[k] = {
-            "search_volume": float(max(0.0, min(1.0, v_norm.get(k, 0.5)))),
+            "relative_interest": float(max(0.0, min(1.0, v_norm.get(k, 0.5)))),
             "difficulty": float(max(0.0, min(1.0, d_norm.get(k, 0.5)))),
             "ctr_potential": ctr,
             "serp_features": serp_features,
@@ -697,11 +697,12 @@ def opportunity_scores(
     documents: Optional[List[str]] = None,
     use_naturalness: bool = True,
     use_universal_penalty: bool = True,
+    unvalidated_penalty: float = 0.9,
 ) -> Dict[str, float]:
     """
     Calculate opportunity scores for keywords with quality filtering.
     
-    Formula: (search_volume * ctr * (1 - difficulty) * relevance) * naturalness - universal_penalty
+    Formula: (relative_interest * ctr * (1 - difficulty) * relevance) * naturalness * validation_factor - universal_penalty
     
     Week 4 additions:
     - Naturalness scoring via sentence-transformers (penalizes nonsense)
@@ -718,6 +719,7 @@ def opportunity_scores(
         documents: Optional documents for detecting universal terms
         use_naturalness: Whether to apply naturalness scoring
         use_universal_penalty: Whether to apply universal term penalty
+        unvalidated_penalty: Penalty factor (0-1) for unvalidated keywords (0.9 = 90% reduction)
         
     Returns:
         Dict mapping keyword -> opportunity score (0.0 - 1.0)
@@ -744,7 +746,7 @@ def opportunity_scores(
     for k, m in metrics.items():
         intent = intents.get(k, "informational")
         br = business_relevance(intent, goals)  # 0.6..1.0
-        v = m.get("search_volume", 0.0)
+        v = m.get("relative_interest", 0.0)
         d = m.get("difficulty", 0.5)
         ctr = m.get("ctr_potential", 1.0) if use_ctr_adjustment else 1.0
         
@@ -775,6 +777,12 @@ def opportunity_scores(
         if use_universal_penalty and universal_terms:
             penalty = calculate_universal_term_penalty(k, universal_terms)
             score = score * (1 - penalty)
+        
+        # Apply unvalidated keyword penalty
+        # Keywords not confirmed via autocomplete are risky - penalize heavily
+        is_validated = m.get("validated", False)
+        if not is_validated and unvalidated_penalty > 0:
+            score *= (1 - unvalidated_penalty)  # 0.9 penalty = reduce by 90%
         
         scores[k] = float(max(0.0, min(1.0, score)))
     

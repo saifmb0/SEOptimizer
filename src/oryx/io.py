@@ -1,5 +1,5 @@
 """
-Input/Output utilities for ORYX (Keyword Lab).
+Input/Output utilities for ORYX.
 
 Provides professional Excel reporting with charts, multi-tab analysis,
 and stakeholder-ready outputs for the UAE contracting sector.
@@ -94,7 +94,7 @@ def write_excel(
     
     if not HAS_OPENPYXL:
         logging.warning(
-            "Excel export requires openpyxl. Install with: pip install keyword-lab[excel]"
+            "Excel export requires openpyxl. Install with: pip install oryx[excel]"
         )
         return
     
@@ -118,26 +118,29 @@ def write_excel(
     if include_executive_summary:
         _create_executive_summary(workbook, df, report_title, geo)
     
-    # 2. Keywords Sheet (main data)
+    # 2. Site Architecture (hierarchical: Parent Topic -> Cluster -> Keywords)
+    _create_site_architecture_sheet(workbook, df)
+    
+    # 3. Keywords Sheet (main data)
     _create_keywords_sheet(workbook, df)
     
-    # 3. Cluster Analysis
+    # 4. Cluster Analysis
     _create_cluster_analysis(workbook, df, include_charts)
     
-    # 4. Intent Breakdown
+    # 5. Intent Breakdown
     _create_intent_analysis(workbook, df, include_charts)
     
-    # 5. Priority Matrix
+    # 6. Priority Matrix
     _create_priority_matrix(workbook, df)
     
-    # 6. GEO Analysis (if available)
+    # 7. GEO Analysis (if available)
     _create_geo_analysis(workbook, df)
     
-    # 7. Location Analysis (UAE)
+    # 8. Location Analysis (UAE)
     if geo.lower() == 'ae':
         _create_location_analysis(workbook, df)
     
-    # 8. Recommendations
+    # 9. Recommendations
     _create_recommendations(workbook, df, geo)
     
     # Save workbook
@@ -173,7 +176,7 @@ def _create_executive_summary(
     metrics = [
         ("Total Keywords", len(df)),
         ("Unique Clusters", df['cluster'].nunique() if 'cluster' in df.columns else "N/A"),
-        ("Avg. Search Volume", f"{df['search_volume'].mean():,.0f}" if 'search_volume' in df.columns else "N/A"),
+        ("Avg. Relative Interest", f"{df['relative_interest'].mean():.2f}" if 'relative_interest' in df.columns else "N/A"),
         ("Avg. Difficulty", f"{df['difficulty'].mean():.2f}" if 'difficulty' in df.columns else "N/A"),
         ("Avg. Opportunity Score", f"{df['opportunity_score'].mean():.2f}" if 'opportunity_score' in df.columns else "N/A"),
         ("High-Priority Keywords", len(df[(df.get('opportunity_score', 0) >= 0.5)]) if 'opportunity_score' in df.columns else "N/A"),
@@ -211,6 +214,86 @@ def _create_executive_summary(
     sheet.column_dimensions['A'].width = 30
     sheet.column_dimensions['B'].width = 20
     sheet.column_dimensions['C'].width = 15
+
+
+def _create_site_architecture_sheet(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
+    """
+    Create a hierarchical site architecture sheet.
+    
+    Groups keywords by Parent Topic -> Cluster to visualize website structure.
+    This helps content managers understand the recommended site hierarchy.
+    """
+    if 'parent_topic' not in df.columns or 'cluster' not in df.columns:
+        return
+    
+    sheet = workbook.create_sheet("Site Architecture")
+    
+    # Header
+    sheet['A1'] = "SITE ARCHITECTURE"
+    sheet['A1'].font = Font(size=16, bold=True, color=ORYX_COLORS["primary"])
+    sheet.merge_cells('A1:D1')
+    
+    sheet['A2'] = "Hierarchical view: Parent Topic → Cluster → Keywords"
+    sheet['A2'].font = Font(size=10, italic=True, color="666666")
+    
+    # Column headers
+    headers = ["Level", "Topic/Cluster/Keyword", "Intent", "Opportunity"]
+    for c_idx, header in enumerate(headers, 1):
+        cell = sheet.cell(row=4, column=c_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=ORYX_COLORS["primary"], 
+                                end_color=ORYX_COLORS["primary"], fill_type="solid")
+    
+    row_idx = 5
+    
+    # Group by parent_topic, then cluster
+    for parent_topic in df['parent_topic'].unique():
+        # L1: Parent Topic (Pillar)
+        cell = sheet.cell(row=row_idx, column=1, value="L1 - Pillar")
+        cell.font = Font(bold=True, color=ORYX_COLORS["primary"])
+        
+        cell = sheet.cell(row=row_idx, column=2, value=parent_topic.title())
+        cell.font = Font(bold=True, size=12)
+        
+        # Calculate average opportunity for parent topic
+        pt_df = df[df['parent_topic'] == parent_topic]
+        avg_opp = pt_df['opportunity_score'].mean()
+        sheet.cell(row=row_idx, column=4, value=f"{avg_opp:.2f}")
+        
+        row_idx += 1
+        
+        # L2: Clusters under this parent topic
+        for cluster in pt_df['cluster'].unique():
+            cell = sheet.cell(row=row_idx, column=1, value="  L2 - Cluster")
+            cell.font = Font(color=ORYX_COLORS["secondary"])
+            
+            cell = sheet.cell(row=row_idx, column=2, value=f"  └─ {cluster}")
+            cell.font = Font(bold=True, color=ORYX_COLORS["secondary"])
+            
+            cluster_df = pt_df[pt_df['cluster'] == cluster]
+            cluster_opp = cluster_df['opportunity_score'].mean()
+            sheet.cell(row=row_idx, column=4, value=f"{cluster_opp:.2f}")
+            
+            row_idx += 1
+            
+            # L3: Keywords in this cluster
+            for _, kw_row in cluster_df.head(5).iterrows():  # Top 5 per cluster
+                sheet.cell(row=row_idx, column=1, value="    L3 - Keyword")
+                sheet.cell(row=row_idx, column=2, value=f"      └─ {kw_row['keyword']}")
+                sheet.cell(row=row_idx, column=3, value=kw_row.get('intent', ''))
+                sheet.cell(row=row_idx, column=4, value=f"{kw_row['opportunity_score']:.2f}")
+                row_idx += 1
+        
+        row_idx += 1  # Add spacing between parent topics
+    
+    # Column widths
+    sheet.column_dimensions['A'].width = 15
+    sheet.column_dimensions['B'].width = 50
+    sheet.column_dimensions['C'].width = 15
+    sheet.column_dimensions['D'].width = 12
+    
+    # Freeze header
+    sheet.freeze_panes = 'A5'
 
 
 def _create_keywords_sheet(workbook: "openpyxl.Workbook", df: pd.DataFrame) -> None:
@@ -281,11 +364,11 @@ def _create_cluster_analysis(
     # Create summary
     summary = df.groupby('cluster').agg({
         'keyword': 'count',
-        'search_volume': ['sum', 'mean'],
+        'relative_interest': ['sum', 'mean'],
         'difficulty': 'mean',
         'opportunity_score': 'mean',
     }).round(3)
-    summary.columns = ['count', 'total_volume', 'avg_volume', 'avg_difficulty', 'avg_opportunity']
+    summary.columns = ['count', 'total_interest', 'avg_interest', 'avg_difficulty', 'avg_opportunity']
     summary = summary.sort_values('avg_opportunity', ascending=False).reset_index()
     
     # Write data
@@ -335,11 +418,11 @@ def _create_intent_analysis(
     # Create summary
     intent_summary = df.groupby('intent').agg({
         'keyword': 'count',
-        'search_volume': 'mean',
+        'relative_interest': 'mean',
         'difficulty': 'mean',
         'opportunity_score': 'mean',
     }).round(3)
-    intent_summary.columns = ['count', 'avg_volume', 'avg_difficulty', 'avg_opportunity']
+    intent_summary.columns = ['count', 'avg_interest', 'avg_difficulty', 'avg_opportunity']
     intent_summary = intent_summary.sort_values('count', ascending=False).reset_index()
     
     # Write data
@@ -731,29 +814,76 @@ def _suggest_schema_type(intent: str, cluster_name: str) -> str:
 # Output Router
 # =============================================================================
 
+def generate_run_id() -> str:
+    """Generate a timestamped run ID in YYYYMMDDHHMM format."""
+    return datetime.now().strftime("%Y%m%d%H%M")
+
+
+def get_run_dir(base_dir: str = "./data", run_id: Optional[str] = None) -> Path:
+    """
+    Get or create a timestamped run directory.
+    
+    Args:
+        base_dir: Base directory for runs (default: ./data)
+        run_id: Optional run ID. If None, generates a new one.
+        
+    Returns:
+        Path to the run directory (e.g., ./data/run_id=202506151430/)
+    """
+    if run_id is None:
+        run_id = generate_run_id()
+    run_dir = Path(base_dir) / f"run_id={run_id}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
 def write_output(
     items: List[Dict], 
     output_path: str, 
     save_csv: str = None,
     geo: str = "ae",
     report_title: str = "ORYX Keyword Intelligence Report",
-) -> None:
+    use_run_dir: bool = False,
+    run_id: Optional[str] = None,
+) -> Optional[Path]:
     """
     Write output in the appropriate format based on file extension.
+    
+    Args:
+        items: List of keyword dictionaries to write.
+        output_path: Path to output file (or "-" for stdout).
+        save_csv: Optional path for additional CSV export.
+        geo: Geographic region for Excel report.
+        report_title: Title for Excel report.
+        use_run_dir: If True, wrap outputs in ./data/run_id=YYYYMMDDHHMM/
+        run_id: Optional run ID. If None and use_run_dir=True, generates one.
+        
+    Returns:
+        Path to the run directory if use_run_dir=True, otherwise None.
     """
     if output_path == "-":
         write_json(items, output_path)
-        return
+        return None
     
     path = Path(output_path)
     ext = path.suffix.lower()
     
+    # Optionally wrap in timestamped run directory
+    run_dir = None
+    if use_run_dir:
+        run_dir = get_run_dir(run_id=run_id)
+        path = run_dir / path.name
+        logging.info(f"Writing outputs to run directory: {run_dir}")
+    
     if ext == ".xlsx":
-        write_excel(items, output_path, geo=geo, report_title=report_title)
+        write_excel(items, str(path), geo=geo, report_title=report_title)
     elif ext == ".csv":
-        write_csv(items, output_path)
+        write_csv(items, str(path))
     else:
-        write_json(items, output_path)
+        write_json(items, str(path))
     
     if save_csv:
-        write_csv(items, save_csv)
+        csv_path = run_dir / Path(save_csv).name if run_dir else save_csv
+        write_csv(items, str(csv_path))
+    
+    return run_dir

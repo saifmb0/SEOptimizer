@@ -1,8 +1,8 @@
 # =============================================================================
 # Niche Preset: Contracting Companies in UAE
 # =============================================================================
-# This preset configures keyword-lab for the UAE construction/contracting market.
-# Use with: keyword-lab --preset presets/contracting_ae.yaml --seed "villa renovation"
+# This preset configures ORYX for the UAE construction/contracting market.
+# Use with: oryx --preset presets/contracting_ae.yaml --seed "villa renovation"
 # =============================================================================
 
 # Market Configuration
@@ -42,7 +42,21 @@ locale_terminology:
     - "labour camp"       # Worker accommodation
     - "warehouse"         # Industrial construction
     - "portacabin"        # Temporary structures
-    
+
+  filtering:
+  blacklist:
+    - "monday"
+    - "tuesday"
+    - "wednesday"
+    - "thursday"
+    - "friday"
+    - "saturday"
+    - "sunday"
+    - "rights reserved"
+    - "copyright"
+    - "term"
+    - "condition"
+
   # UAE regulatory/permit terms
   regulatory:
     - "Musataha"          # Long-term land lease

@@ -1,5 +1,5 @@
 """
-Multilingual Stopwords Module for Keyword Lab.
+Multilingual Stopwords Module for ORYX.
 
 Provides stopword lists for multiple languages to support
 internationalized keyword extraction and NLP processing.

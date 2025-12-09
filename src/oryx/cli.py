@@ -53,7 +53,7 @@ def display_results_table(items: List[dict], max_rows: int = 25):
     table.add_column("Cluster", style="green")
     table.add_column("Intent", style="yellow")
     table.add_column("Funnel", style="blue")
-    table.add_column("Vol", justify="right", style="white")
+    table.add_column("Interest", justify="right", style="white")
     table.add_column("Diff", justify="right", style="white")
     table.add_column("Opp", justify="right", style="bold green")
     
@@ -63,7 +63,7 @@ def display_results_table(items: List[dict], max_rows: int = 25):
             item["cluster"],
             item["intent"],
             item["funnel_stage"],
-            f"{item['search_volume']:.2f}",
+            f"{item['relative_interest']:.2f}",
             f"{item['difficulty']:.2f}",
             f"{item['opportunity_score']:.2f}",
         )
@@ -101,6 +101,10 @@ def run(
     table_output: bool = typer.Option(False, "--table", help="Display results as a table instead of JSON"),
     preset: Optional[str] = typer.Option(None, "--preset", help="Niche preset file (e.g., presets/contracting_ae.yaml)"),
     niche: Optional[str] = typer.Option(None, "--niche", help="Niche for commercial scoring (contracting, real_estate, legal)"),
+    use_run_dir: bool = typer.Option(False, "--run-dir", help="Save outputs in ./data/run_id=YYYYMMDDHHMM/"),
+    crawl_competitors: bool = typer.Option(False, "--crawl-competitors", help="Spider competitor sitemaps to discover their pages"),
+    competitor_path_filters: Optional[str] = typer.Option(None, "--competitor-paths", help="Comma-separated path patterns (e.g., '/services/,/blog/')"),
+    max_competitor_pages: int = typer.Option(50, "--max-competitor-pages", help="Max pages per competitor domain"),
 ):
     """
     Run the keyword discovery pipeline.
@@ -162,9 +166,14 @@ def run(
             f"[bold]Seed:[/bold] {seed_topic}\n"
             f"[bold]Audience:[/bold] {audience}\n"
             f"[bold]Geo:[/bold] {geo} | [bold]Language:[/bold] {language}{niche_display}",
-            title="🔬 Keyword Lab",
+            title="ORYX",
             border_style="blue",
         ))
+
+    # Parse competitor path filters
+    path_filters = None
+    if competitor_path_filters:
+        path_filters = [p.strip() for p in competitor_path_filters.split(",") if p.strip()]
 
     items = run_pipeline(
         seed_topic=seed_topic,
@@ -186,6 +195,10 @@ def run(
         config=cfg,
         dry_run=dry_run,
         niche=effective_niche,
+        use_run_dir=use_run_dir,
+        crawl_competitors=crawl_competitors,
+        competitor_path_filters=path_filters,
+        max_competitor_pages=max_competitor_pages,
     )
 
     # Output display
@@ -226,7 +239,7 @@ def brief(
     - Entity/topic recommendations
     
     Example:
-        keyword-lab brief keywords.json --cluster cluster-0 -o brief.md
+        oryx brief keywords.json --cluster cluster-0 -o brief.md
     """
     from .llm import _detect_provider, HAS_GENAI, HAS_LITELLM
     
@@ -294,7 +307,7 @@ def geo_brief(
     - Location-based keyword variations
     
     Example:
-        keyword-lab geo-brief keywords.json --geo ae --niche contracting -o brief.md
+        oryx geo-brief keywords.json --geo ae --niche contracting -o brief.md
     """
     from .llm import _detect_provider
     
@@ -363,7 +376,7 @@ def _generate_content_brief(cluster_name: str, keywords: List[dict], provider: s
     kw_list = [k["keyword"] for k in keywords]
     intents = set(k.get("intent", "informational") for k in keywords)
     primary_intent = max(intents, key=lambda i: sum(1 for k in keywords if k.get("intent") == i))
-    avg_volume = sum(k.get("search_volume", 0) for k in keywords) / len(keywords)
+    avg_interest = sum(k.get("relative_interest", 0) for k in keywords) / len(keywords)
     avg_difficulty = sum(k.get("difficulty", 0) for k in keywords) / len(keywords)
     questions = [k["keyword"] for k in keywords if any(
         k["keyword"].startswith(q) for q in ["how", "what", "why", "when", "where", "which", "who"]
@@ -436,7 +449,7 @@ def _generate_geo_brief(
     kw_list = [k["keyword"] for k in keywords]
     intents = set(k.get("intent", "informational") for k in keywords)
     primary_intent = max(intents, key=lambda i: sum(1 for k in keywords if k.get("intent") == i))
-    avg_volume = sum(k.get("search_volume", 0) for k in keywords) / len(keywords)
+    avg_interest = sum(k.get("relative_interest", 0) for k in keywords) / len(keywords)
     avg_difficulty = sum(k.get("difficulty", 0) for k in keywords) / len(keywords)
     avg_ctr = sum(k.get("ctr_potential", 1.0) for k in keywords) / len(keywords)
     
@@ -713,7 +726,7 @@ def qa(
     - Removing keywords below score thresholds
     
     Example:
-        keyword-lab qa keywords.json --min-cluster-size 3 --max-words 6 --report
+        oryx qa keywords.json --min-cluster-size 3 --max-words 6 --report
     """
     setup_logging(verbose)
     
@@ -749,7 +762,7 @@ def qa(
         max_word_count=max_words,
         min_word_count=min_words,
         min_opportunity_score=min_opportunity,
-        min_search_volume=min_volume,
+        min_relative_interest=min_volume,
     )
     
     # Display summary
@@ -784,9 +797,9 @@ def qa(
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """
-    🔬 Keyword Lab - Discover and cluster SEO keywords from any content.
+    🔬 ORYX - Discover and cluster SEO keywords from any content.
     
-    Run 'keyword-lab run' to start the pipeline.
+    Run 'oryx run' to start the pipeline.
     """
     if ctx.invoked_subcommand is None:
         # If no command provided, show help

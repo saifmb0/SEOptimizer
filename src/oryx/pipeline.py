@@ -6,14 +6,14 @@ from typing import Dict, List, Optional
 import numpy as np
 from dotenv import load_dotenv
 
-from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete
-from .nlp import generate_candidates, clean_text, DEFAULT_QUESTION_PREFIXES, seed_expansions
+from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url, get_paa_questions, DEFAULT_CACHE_DIR
+from .nlp import generate_candidates, clean_text
 from .cluster import cluster_keywords, infer_intent
 from .metrics import compute_metrics, opportunity_scores
 from .schema import validate_items
 from .io import write_output
 from .llm import expand_with_llm, assign_parent_topics, verify_candidates_with_llm
-from .config import load_config, get_intent_rules, get_question_prefixes, config_to_dict
+from .config import load_config, get_intent_rules, config_to_dict
 
 
 def to_funnel_stage(intent: str) -> str:
@@ -44,6 +44,10 @@ def run_pipeline(
     config = None,
     dry_run: bool = False,
     niche: Optional[str] = None,
+    use_run_dir: bool = False,
+    crawl_competitors: bool = False,
+    competitor_path_filters: Optional[List[str]] = None,
+    max_competitor_pages: int = 50,
 ) -> List[Dict]:
     load_dotenv()
 
@@ -59,7 +63,6 @@ def run_pipeline(
     
     # Get configurable rules (handles both Pydantic and dict)
     intent_rules = get_intent_rules(config)
-    question_prefixes = get_question_prefixes(config)
 
     # Acquire documents (with caching for faster iterations)
     docs = acquire_documents(
@@ -69,11 +72,40 @@ def run_pipeline(
         max_serp_results=int(scrape_cfg.get("max_serp_results", 10)),
         timeout=int(scrape_cfg.get("timeout", 10)),
         retries=int(scrape_cfg.get("retries", 2)),
-        user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "keyword-lab/1.0"))),
+        user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "oryx/1.0"))),
         dry_run=dry_run,
         use_cache=bool(scrape_cfg.get("cache_enabled", True)),
-        cache_dir=str(scrape_cfg.get("cache_dir", ".keyword_lab_cache")),
+        cache_dir=str(scrape_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
     )
+    
+    # Competitor sitemap crawling (the "Hunter" feature)
+    if crawl_competitors and competitors and not dry_run:
+        logging.info(f"Crawling {len(competitors)} competitor sitemaps...")
+        competitor_urls = crawl_competitor_sitemaps(
+            competitor_domains=competitors,
+            path_filters=competitor_path_filters,
+            max_pages_per_domain=max_competitor_pages,
+            timeout=int(scrape_cfg.get("timeout", 10)),
+            user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "oryx/1.0"))),
+        )
+        
+        # Fetch competitor pages
+        for url in competitor_urls:
+            # Avoid duplicates
+            if any(d.url == url for d in docs):
+                continue
+            fetched = fetch_url(
+                url,
+                timeout=int(scrape_cfg.get("timeout", 10)),
+                retries=int(scrape_cfg.get("retries", 2)),
+                user_agent=str(scrape_cfg.get("user_agent", os.getenv("USER_AGENT", "oryx/1.0"))),
+                use_cache=bool(scrape_cfg.get("cache_enabled", True)),
+                cache_dir=str(scrape_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
+            )
+            if fetched:
+                docs.append(fetched)
+        
+        logging.info(f"Total documents after competitor crawl: {len(docs)}")
 
     # Build pseudo-doc from seed_topic and audience if no content
     # Use newlines to separate components - this prevents n-gram crossing
@@ -88,17 +120,24 @@ def run_pipeline(
         ])
         docs = [Document(url="seed", title=seed_topic, text=pseudo_text)]
 
-    # Generate keyword candidates from documents
+    # Generate keyword candidates from documents (EXTRACTION ONLY)
     doc_dicts = [dict(url=d.url, title=d.title, text=d.text) for d in docs]
     candidates = generate_candidates(
         doc_dicts,
         ngram_min_df=int(nlp_cfg.get("ngram_min_df", 2)),
         top_terms_per_doc=int(nlp_cfg.get("top_terms_per_doc", 10)),
-        question_prefixes=question_prefixes,
     )
 
-    # Seed-based and LLM expansions
-    seed_cands = seed_expansions(seed_topic, audience)
+    # ==========================================================================
+    # EXTRACTION ONLY: No heuristic seed expansion
+    # ==========================================================================
+    # REMOVED: seed_expansions() which produced garbage like "how to villa"
+    # We now trust only the exact seed and real data sources:
+    # - LLM generation (understands grammar)
+    # - PAA questions from Google/Bing (verified real queries)
+    seed_cands = [seed_topic.lower()]
+    
+    # LLM-based expansion (grammar-aware)
     llm_cfg = cfg_dict.get("llm", {})
     llm_cands = expand_with_llm(
         seed_topic, audience, language, geo, 
@@ -106,7 +145,19 @@ def run_pipeline(
         provider=llm_cfg.get("provider", "auto"),
         model=llm_cfg.get("model"),
     )
-    candidates = list(dict.fromkeys([*candidates, *seed_cands, *llm_cands]))
+    
+    # Fetch real PAA questions from search engines (verified queries)
+    paa_questions = []
+    if provider and provider != "none":
+        paa_questions = get_paa_questions(
+            query or seed_topic,
+            provider=provider,
+        )
+        if paa_questions:
+            logging.info(f"Acquired {len(paa_questions)} real PAA questions from {provider}")
+    
+    # Combine ONLY verified data sources
+    candidates = list(dict.fromkeys([*candidates, *seed_cands, *llm_cands, *paa_questions]))
 
     # Apply blacklist and length filtering
     filter_cfg = cfg_dict.get("filtering", {})
@@ -141,10 +192,13 @@ def run_pipeline(
         return []
 
     # Detect question-style keywords for volume boost
+    # Use common question prefixes directly (no longer from config)
+    QUESTION_PREFIXES = ["how", "what", "why", "when", "where", "which", "who", "can", "does", "is"]
     qset = set()
     for kw in candidates:
-        for pref in question_prefixes:
-            if kw.startswith(pref + " "):
+        kw_lower = kw.lower()
+        for pref in QUESTION_PREFIXES:
+            if kw_lower.startswith(pref + " "):
                 qset.add(kw)
                 break
 
@@ -246,7 +300,7 @@ def run_pipeline(
     # Assemble per cluster, prioritize opportunity score within clusters
     items: List[Dict] = []
     for cname, kws in clusters.items():
-        kws_sorted = sorted(kws, key=lambda k: (opp.get(k, 0), metrics.get(k, {}).get("search_volume", 0)), reverse=True)
+        kws_sorted = sorted(kws, key=lambda k: (opp.get(k, 0), metrics.get(k, {}).get("relative_interest", 0)), reverse=True)
         selected = []
         seen = set()
         for kw in kws_sorted:
@@ -270,7 +324,7 @@ def run_pipeline(
                 "parent_topic": pt.lower() if isinstance(pt, str) else str(pt).lower(),
                 "intent": intents.get(kw, "informational"),
                 "funnel_stage": to_funnel_stage(intents.get(kw, "informational")),
-                "search_volume": float(m.get("search_volume", 0.0)),
+                "relative_interest": float(m.get("relative_interest", 0.0)),
                 "difficulty": float(m.get("difficulty", 0.0)),
                 "ctr_potential": float(m.get("ctr_potential", 1.0)),
                 "serp_features": serp_features,
@@ -280,8 +334,8 @@ def run_pipeline(
             }
             items.append(it)
 
-    # Global ranking by opportunity_score (then search_volume desc, then keyword asc)
-    items = sorted(items, key=lambda it: (-it["opportunity_score"], -it["search_volume"], it["keyword"]))
+    # Global ranking by opportunity_score (then relative_interest desc, then keyword asc)
+    items = sorted(items, key=lambda it: (-it["opportunity_score"], -it["relative_interest"], it["keyword"]))
 
     # ORYX Quality Gate: Filter unvalidated low-opportunity keywords
     # Keeps validated keywords OR high-opportunity unvalidated ones
@@ -304,6 +358,6 @@ def run_pipeline(
 
     # Persist outputs (supports .json, .csv, .xlsx based on extension)
     if output:
-        write_output(items, output, save_csv)
+        write_output(items, output, save_csv, use_run_dir=use_run_dir)
 
     return items

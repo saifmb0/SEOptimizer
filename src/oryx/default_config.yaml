@@ -1,4 +1,4 @@
-# Default configuration for Keyword Lab
+# Default configuration for ORYX
 # Users can override any of these values in their own config.yaml
 
 # Intent detection rules - maps intent type to trigger words/phrases
@@ -69,7 +69,7 @@ nlp:
 scrape:
   timeout: 10
   retries: 2
-  user_agent: "keyword-lab/1.0"
+  user_agent: "oryx/1.0"
   max_serp_results: 10
   cache_enabled: true
   cache_dir: ".oryx_cache"
@@ -139,7 +139,7 @@ quality:
   # Flag clusters with low entity density as "thin content risk"
   entity_density_threshold: 0.3
 
-# QA validation settings (for 'keyword-lab qa' command)
+# QA validation settings (for 'oryx qa' command)
 qa:
   # Minimum keywords per cluster - clusters below this threshold are removed
   min_cluster_size: 3
@@ -154,6 +154,7 @@ qa:
   # Set higher to focus on high-value keywords only
   min_opportunity_score: 0.0
   
-  # Minimum search volume threshold (0.0-1.0)
-  # Set higher to exclude low-volume long-tail keywords
-  min_search_volume: 0.0
+  # Minimum relative interest threshold (0.0-1.0)
+  # Note: This is a normalized score (0-1), NOT absolute search volume
+  # Set higher to exclude low-interest long-tail keywords
+  min_relative_interest: 0.0
