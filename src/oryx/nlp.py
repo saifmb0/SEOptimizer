@@ -850,72 +850,6 @@ def ngram_counts(texts: List[str], ngram_range=(2, 3), min_df: int = 2) -> pd.Da
     return df
 
 
-QUESTION_PREFIXES = [
-    "how", "what", "best", "vs", "for", "near me", "beginner", "advanced", "guide", "checklist", "template", "why"
-]
-
-# Alias for external access (can be overridden via config)
-DEFAULT_QUESTION_PREFIXES = QUESTION_PREFIXES.copy()
-
-# =============================================================================
-# Template-Based Question Generation (Smart Expansion)
-# =============================================================================
-# Instead of blindly prepending prefixes ("how" + "company" = "how company"),
-# we use grammatical templates that produce valid English queries.
-
-QUESTION_TEMPLATES = {
-    "how": [
-        "how to {kw}",
-        "how does {kw} work",
-        "how much does {kw} cost",
-    ],
-    "what": [
-        "what is {kw}",
-        "what does {kw} include",
-        "what to look for in {kw}",
-    ],
-    "best": [
-        "best {kw}",
-        "top {kw}",
-        "top rated {kw}",
-    ],
-    "vs": [
-        "{kw} vs alternatives",
-        "{kw} comparison",
-    ],
-    "for": [
-        "{kw} for beginners",
-        "{kw} for homeowners",
-        "{kw} for commercial",
-    ],
-    "cost": [
-        "cost of {kw}",
-        "{kw} price",
-        "{kw} rates",
-    ],
-    "why": [
-        "why choose {kw}",
-        "why hire {kw}",
-        "benefits of {kw}",
-    ],
-    "guide": [
-        "{kw} guide",
-        "complete {kw} guide",
-        "{kw} checklist",
-    ],
-    "near me": [
-        "{kw} near me",  # Template ensures proper suffix positioning
-    ],
-}
-
-# =============================================================================
-# Semantic Compatibility Rules for Question Generation
-# =============================================================================
-# These rules prevent logically nonsensical combinations like:
-# - "where to buy contracting company" (you hire, not buy companies)
-# - "near me near me warehouse" (duplicate modifiers)
-
-# Service-oriented terms that don't work with "buy" prefixes
 SERVICE_TERMS = frozenset({
     "company", "companies", "contractor", "contractors", 
     "service", "services", "agency", "agencies",
@@ -932,23 +866,6 @@ PRODUCT_TERMS = frozenset({
     "software", "hardware", "device", "devices",
 })
 
-# Prefixes that imply purchasing a product (not hiring a service)
-BUY_PREFIXES = frozenset({
-    "buy", "where to buy", "purchase", "order", "shop for",
-    "cheap", "discount", "for sale", "price of",
-})
-
-# Prefixes that imply hiring a service
-HIRE_PREFIXES = frozenset({
-    "hire", "find", "get quotes", "quotes for", "cost of",
-    "best", "top rated", "recommended",
-})
-
-# Local modifiers that shouldn't be duplicated
-LOCAL_MODIFIERS = frozenset({
-    "near me", "nearby", "local", "in my area",
-})
-
 
 class SeedType:
     """Classification of seed topics for semantic logic gates."""
@@ -960,11 +877,6 @@ class SeedType:
 def classify_seed_type(seed: str) -> str:
     """
     Classify a seed topic as Service, Product, or Unknown.
-    
-    This determines which keyword templates are appropriate:
-    - SERVICE: Use "hire", "quotes", "cost of". Ban "buy", "cheap".
-    - PRODUCT: Use "buy", "price", "reviews". 
-    - UNKNOWN: Use general templates.
     
     Args:
         seed: The seed topic/keyword
@@ -1067,84 +979,6 @@ def is_near_me_valid(keyword: str) -> bool:
     # Must be at the end
     return keyword_lower.endswith("near me")
 
-
-def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Optional[List[str]] = None) -> List[str]:
-    """
-    Generate question-style keywords from phrases using grammatical templates.
-    
-    Uses QUESTION_TEMPLATES for proper English structure instead of blind
-    prefix concatenation. This prevents garbage like "how company" and
-    produces valid queries like "how to hire company".
-    
-    Applies compatibility rules to prevent nonsensical combinations:
-    - No "buy" prefixes for service companies (you hire, not buy)
-    - No duplicate local modifiers ("near me near me")
-    - No redundant question prefixes
-    
-    Args:
-        phrases: Source phrases to expand
-        top_n: Maximum number of phrases to process
-        prefixes: Optional custom prefixes (from config) - used to filter templates
-        
-    Returns:
-        List of generated question keywords (semantically valid only)
-    """
-    # Determine which template categories to use
-    if prefixes is not None:
-        # Filter templates to only use categories matching provided prefixes
-        active_templates = {k: v for k, v in QUESTION_TEMPLATES.items() if k in prefixes}
-    else:
-        active_templates = QUESTION_TEMPLATES
-    
-    qs = []
-    
-    for p in list(phrases)[:top_n]:
-        # Require minimum phrase length for expansion
-        if len(p.split()) < 2:
-            continue
-        
-        p_lower = p.lower()
-        p_tokens = set(p_lower.split())
-        
-        # Detect if phrase is about services (not products)
-        is_service_term = bool(p_tokens & SERVICE_TERMS)
-        
-        # Detect if phrase already has a local modifier
-        has_local_modifier = any(mod in p_lower for mod in LOCAL_MODIFIERS)
-        
-        for category, templates in active_templates.items():
-            category_lower = category.lower()
-            
-            # =================================================================
-            # RULE 1: Skip "buy" prefixes for service companies
-            # =================================================================
-            if category_lower in BUY_PREFIXES and is_service_term:
-                continue
-            
-            # =================================================================
-            # RULE 2: Skip local modifiers if phrase already has one
-            # =================================================================
-            if category_lower in LOCAL_MODIFIERS and has_local_modifier:
-                continue
-            
-            # =================================================================
-            # RULE 3: Skip if category keyword is already in the phrase
-            # =================================================================
-            if category_lower in p_lower:
-                continue
-            
-            # Apply each template in the category
-            for template in templates:
-                q = template.format(kw=p).strip()
-                
-                # Ensure minimum word count
-                if len(q.split()) >= 3:
-                    qs.append(q)
-    
-    # Post-process: filter out any keywords with invalid near-me positioning
-    qs = [q for q in qs if is_near_me_valid(q)]
-    
-    return qs
 
 
 def tfidf_top_terms_per_doc(texts: List[str], ngram_range=(2, 3), top_k: int = 10) -> List[str]:
