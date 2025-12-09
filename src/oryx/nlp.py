@@ -798,6 +798,57 @@ QUESTION_PREFIXES = [
 DEFAULT_QUESTION_PREFIXES = QUESTION_PREFIXES.copy()
 
 # =============================================================================
+# Template-Based Question Generation (Smart Expansion)
+# =============================================================================
+# Instead of blindly prepending prefixes ("how" + "company" = "how company"),
+# we use grammatical templates that produce valid English queries.
+
+QUESTION_TEMPLATES = {
+    "how": [
+        "how to {kw}",
+        "how does {kw} work",
+        "how much does {kw} cost",
+    ],
+    "what": [
+        "what is {kw}",
+        "what does {kw} include",
+        "what to look for in {kw}",
+    ],
+    "best": [
+        "best {kw}",
+        "top {kw}",
+        "top rated {kw}",
+    ],
+    "vs": [
+        "{kw} vs alternatives",
+        "{kw} comparison",
+    ],
+    "for": [
+        "{kw} for beginners",
+        "{kw} for homeowners",
+        "{kw} for commercial",
+    ],
+    "cost": [
+        "cost of {kw}",
+        "{kw} price",
+        "{kw} rates",
+    ],
+    "why": [
+        "why choose {kw}",
+        "why hire {kw}",
+        "benefits of {kw}",
+    ],
+    "guide": [
+        "{kw} guide",
+        "complete {kw} guide",
+        "{kw} checklist",
+    ],
+    "near me": [
+        "{kw} near me",  # Template ensures proper suffix positioning
+    ],
+}
+
+# =============================================================================
 # Semantic Compatibility Rules for Question Generation
 # =============================================================================
 # These rules prevent logically nonsensical combinations like:
@@ -959,7 +1010,11 @@ def is_near_me_valid(keyword: str) -> bool:
 
 def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Optional[List[str]] = None) -> List[str]:
     """
-    Generate question-style keywords from phrases with semantic logic gates.
+    Generate question-style keywords from phrases using grammatical templates.
+    
+    Uses QUESTION_TEMPLATES for proper English structure instead of blind
+    prefix concatenation. This prevents garbage like "how company" and
+    produces valid queries like "how to hire company".
     
     Applies compatibility rules to prevent nonsensical combinations:
     - No "buy" prefixes for service companies (you hire, not buy)
@@ -969,15 +1024,22 @@ def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Option
     Args:
         phrases: Source phrases to expand
         top_n: Maximum number of phrases to process
-        prefixes: Optional custom prefixes (from config), defaults to QUESTION_PREFIXES
+        prefixes: Optional custom prefixes (from config) - used to filter templates
         
     Returns:
         List of generated question keywords (semantically valid only)
     """
-    question_prefixes = prefixes if prefixes is not None else QUESTION_PREFIXES
+    # Determine which template categories to use
+    if prefixes is not None:
+        # Filter templates to only use categories matching provided prefixes
+        active_templates = {k: v for k, v in QUESTION_TEMPLATES.items() if k in prefixes}
+    else:
+        active_templates = QUESTION_TEMPLATES
+    
     qs = []
     
     for p in list(phrases)[:top_n]:
+        # Require minimum phrase length for expansion
         if len(p.split()) < 2:
             continue
         
@@ -990,44 +1052,34 @@ def generate_questions(phrases: Iterable[str], top_n: int = 50, prefixes: Option
         # Detect if phrase already has a local modifier
         has_local_modifier = any(mod in p_lower for mod in LOCAL_MODIFIERS)
         
-        for pref in question_prefixes:
-            pref_lower = pref.lower()
+        for category, templates in active_templates.items():
+            category_lower = category.lower()
             
             # =================================================================
             # RULE 1: Skip "buy" prefixes for service companies
             # =================================================================
-            # "where to buy contracting company" is nonsensical
-            # Users HIRE contractors, they don't BUY the company
-            if pref_lower in BUY_PREFIXES and is_service_term:
+            if category_lower in BUY_PREFIXES and is_service_term:
                 continue
             
             # =================================================================
             # RULE 2: Skip local modifiers if phrase already has one
             # =================================================================
-            # Prevents "near me warehouse near me" duplication
-            if pref_lower in LOCAL_MODIFIERS and has_local_modifier:
+            if category_lower in LOCAL_MODIFIERS and has_local_modifier:
                 continue
             
             # =================================================================
-            # RULE 3: Skip if prefix is already in the phrase
+            # RULE 3: Skip if category keyword is already in the phrase
             # =================================================================
-            # Prevents "best best contractors" or "how to how to"
-            if pref_lower in p_lower:
+            if category_lower in p_lower:
                 continue
             
-            # =================================================================
-            # RULE 4: Handle "near me" positioning
-            # =================================================================
-            # "near me" must be a SUFFIX, not a prefix
-            # Transform "near me contractors" -> "contractors near me"
-            if pref_lower == "near me":
-                # Add as suffix instead of prefix
-                q = f"{p} near me".strip()
-            else:
-                q = f"{pref} {p}".strip()
-            
-            if len(q.split()) >= 2:
-                qs.append(q)
+            # Apply each template in the category
+            for template in templates:
+                q = template.format(kw=p).strip()
+                
+                # Ensure minimum word count
+                if len(q.split()) >= 3:
+                    qs.append(q)
     
     # Post-process: filter out any keywords with invalid near-me positioning
     qs = [q for q in qs if is_near_me_valid(q)]
