@@ -134,6 +134,12 @@ VALID_START_EXCEPTIONS = frozenset({
     "for",  # "for beginners", "for professionals"
 })
 
+# Words that CANNOT start a keyword - always grammatically invalid
+# "vs villa construction" is broken - "vs" requires a preceding noun
+INVALID_START_PREFIXES = frozenset({
+    "vs", "versus", "or", "and", "but", "nor", "yet",
+})
+
 # Words that must be followed by meaningful content (not just geo codes)
 REQUIRES_CONTENT_AFTER = frozenset({
     "vs", "versus", "or", "and",
@@ -195,7 +201,7 @@ def is_grammatically_valid(keyword: str) -> bool:
     Check if a keyword phrase is grammatically valid.
     
     Uses SpaCy POS tagging to filter out nonsensical combinations:
-    - Rejects keywords starting with conjunctions (and, or, but)
+    - Rejects keywords starting with conjunctions (and, or, but, vs)
     - Rejects keywords starting with prepositions (unless idiom)
     - Rejects pure noun clusters with >3 nouns (Franken-keywords)
     
@@ -205,21 +211,31 @@ def is_grammatically_valid(keyword: str) -> bool:
     Returns:
         True if grammatically valid, False otherwise
     """
-    if not HAS_SPACY or not _nlp_spacy:
-        # If SpaCy not available, allow all (graceful degradation)
-        return True
-    
     keyword = keyword.strip().lower()
     if not keyword or len(keyword.split()) < 2:
         return True  # Single words pass through
     
-    # Check for valid start exceptions first
     first_word = keyword.split()[0]
+    
+    # =================================================================
+    # Rule 0: Hard-reject invalid starting prefixes
+    # =================================================================
+    # "vs villa construction" is broken - requires preceding noun
+    # "or villa construction" is broken - requires preceding clause
+    if first_word in INVALID_START_PREFIXES:
+        logging.debug(f"Grammar filter: '{keyword}' starts with invalid prefix '{first_word}'")
+        return False
+    
+    # Check for valid start exceptions first
     if first_word in VALID_START_EXCEPTIONS:
         return True
     
+    if not HAS_SPACY or not _nlp_spacy:
+        # If SpaCy not available, allow all (graceful degradation)
+        return True
+    
     # =================================================================
-    # Rule 0: Check for words that require meaningful content after
+    # Rule 1: Check for words that require meaningful content after
     # =================================================================
     # "vs managers uae" -> "vs" needs real content, not just 1 word + geo
     if first_word in REQUIRES_CONTENT_AFTER:
