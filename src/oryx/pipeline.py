@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from .scrape import acquire_documents, Document, validate_keywords_with_autocomplete, crawl_competitor_sitemaps, fetch_url, get_paa_questions, DEFAULT_CACHE_DIR
 from .nlp import generate_candidates, clean_text
 from .cluster import cluster_keywords, infer_intent
+from .linguistics import LinguisticsValidator
 from .metrics import compute_metrics, opportunity_scores
 from .schema import validate_items
 from .io import write_output
@@ -159,6 +160,9 @@ def run_pipeline(
     # Combine ONLY verified data sources
     candidates = list(dict.fromkeys([*candidates, *seed_cands, *llm_cands, *paa_questions]))
 
+    # Initialize linguistic validator for garbage filtering
+    linguistics_validator = LinguisticsValidator()
+
     # Apply blacklist and length filtering
     filter_cfg = cfg_dict.get("filtering", {})
     blacklist = [b.lower() for b in filter_cfg.get("blacklist", [])]
@@ -177,6 +181,9 @@ def run_pipeline(
         if len(words) < min_words or len(words) > max_words:
             return False
         if len(kw) < min_chars:
+            return False
+        # Linguistic validation: reject garbage phrases
+        if not linguistics_validator.is_valid_phrase(kw):
             return False
         return True
     
