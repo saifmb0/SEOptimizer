@@ -1,0 +1,119 @@
+# ORYX Commercial Intent Triggers
+# ================================
+# These trigger words are used to estimate commercial value and search intent.
+# Users can customize these for their specific niche.
+#
+# Categories:
+# - commercial: Purchase/lead intent indicators (higher CPC)
+# - transactional: Ready-to-buy signals (highest commercial value)
+# - b2b: B2B/Enterprise indicators (high-value leads)
+# - uae: UAE/Gulf-specific commercial terms
+
+commercial:
+  # Pricing and quotes
+  - quote
+  - quotes
+  - price
+  - prices
+  - pricing
+  - cost
+  - costs
+  - rates
+  - estimate
+  - estimates
+  - estimation
+  # Service providers
+  - companies
+  - company
+  - contractors
+  - contractor
+  - services
+  - hire
+  - hiring
+  - agency
+  - agencies
+  - firm
+  - firms
+  # Consultation
+  - consultation
+  - consult
+  - consultant
+  - consultants
+  # Packages
+  - package
+  - packages
+  - plan
+  - plans
+
+transactional:
+  # Purchase intent
+  - buy
+  - purchase
+  - order
+  - book
+  - booking
+  # Quote requests
+  - get quote
+  - request quote
+  - free quote
+  # Local intent
+  - near me
+  - in my area
+  - local
+  # Deals
+  - for sale
+  - deals
+  - discount
+  - offer
+
+b2b:
+  # Enterprise
+  - enterprise
+  - business
+  - commercial
+  - corporate
+  - b2b
+  # Volume
+  - wholesale
+  - bulk
+  - industrial
+  - professional
+  # Solutions
+  - solutions
+  - platform
+  - software
+  - system
+
+uae:
+  # Construction/Fit-out
+  - fit out
+  - fitout
+  - turnkey
+  - mep
+  - hvac
+  - renovation
+  - construction
+  - contracting
+  - interior design
+  - landscaping
+  # Regulatory
+  - license
+  - approval
+  - permit
+  # Property types
+  - villa
+  - warehouse
+  - office
+
+# Add your niche-specific triggers below:
+# software:
+#   - demo
+#   - trial
+#   - free tier
+#   - saas
+#
+# medical:
+#   - consultation
+#   - appointment
+#   - treatment
+#   - diagnosis

@@ -1,10 +1,80 @@
 import logging
 import math
+import os
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
 from collections import Counter
 
 import numpy as np
 from scipy import stats
+import yaml
+
+
+# =============================================================================
+# Trigger Loading from External YAML
+# =============================================================================
+
+_triggers_cache: Optional[Dict[str, Set[str]]] = None
+
+
+def _get_triggers_path() -> Path:
+    """Get path to triggers.yaml resource file."""
+    return Path(__file__).parent / "resources" / "triggers.yaml"
+
+
+def _load_triggers() -> Dict[str, Set[str]]:
+    """Load triggers from YAML file with caching."""
+    global _triggers_cache
+    
+    if _triggers_cache is not None:
+        return _triggers_cache
+    
+    triggers_path = _get_triggers_path()
+    
+    if triggers_path.exists():
+        try:
+            with open(triggers_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            
+            _triggers_cache = {
+                "commercial": set(data.get("commercial", [])),
+                "transactional": set(data.get("transactional", [])),
+                "b2b": set(data.get("b2b", [])),
+                "uae": set(data.get("uae", [])),
+            }
+            logging.debug(f"Loaded triggers from {triggers_path}")
+            return _triggers_cache
+        except Exception as e:
+            logging.warning(f"Failed to load triggers from {triggers_path}: {e}")
+    
+    # Fallback to defaults if file not found or error
+    _triggers_cache = {
+        "commercial": _DEFAULT_COMMERCIAL_TRIGGERS,
+        "transactional": _DEFAULT_TRANSACTIONAL_TRIGGERS,
+        "b2b": _DEFAULT_B2B_TRIGGERS,
+        "uae": _DEFAULT_UAE_COMMERCIAL_TRIGGERS,
+    }
+    return _triggers_cache
+
+
+def get_commercial_triggers() -> Set[str]:
+    """Get commercial triggers (from YAML or defaults)."""
+    return _load_triggers()["commercial"]
+
+
+def get_transactional_triggers() -> Set[str]:
+    """Get transactional triggers (from YAML or defaults)."""
+    return _load_triggers()["transactional"]
+
+
+def get_b2b_triggers() -> Set[str]:
+    """Get B2B triggers (from YAML or defaults)."""
+    return _load_triggers()["b2b"]
+
+
+def get_uae_triggers() -> Set[str]:
+    """Get UAE-specific triggers (from YAML or defaults)."""
+    return _load_triggers()["uae"]
 
 
 # =============================================================================
@@ -288,10 +358,10 @@ def calculate_universal_term_penalty(
 # =============================================================================
 # Commercial Intent Indicators (CPC Proxy Heuristics)
 # =============================================================================
+# These are default fallbacks. Actual triggers are loaded from resources/triggers.yaml
 
 # High-value commercial keywords indicating purchase/lead intent
-# These typically have higher CPC in paid search
-COMMERCIAL_TRIGGERS = {
+_DEFAULT_COMMERCIAL_TRIGGERS = {
     "quote", "quotes", "price", "prices", "pricing", "cost", "costs",
     "rates", "estimate", "estimates", "estimation",
     "companies", "company", "contractors", "contractor", "services",
@@ -301,7 +371,7 @@ COMMERCIAL_TRIGGERS = {
 }
 
 # Transactional triggers (highest commercial value)
-TRANSACTIONAL_TRIGGERS = {
+_DEFAULT_TRANSACTIONAL_TRIGGERS = {
     "buy", "purchase", "order", "book", "booking",
     "get quote", "request quote", "free quote",
     "near me", "in my area", "local",
@@ -309,20 +379,26 @@ TRANSACTIONAL_TRIGGERS = {
 }
 
 # B2B/Enterprise indicators (high-value leads)
-B2B_TRIGGERS = {
+_DEFAULT_B2B_TRIGGERS = {
     "enterprise", "business", "commercial", "corporate", "b2b",
     "wholesale", "bulk", "industrial", "professional",
     "solutions", "platform", "software", "system",
 }
 
 # UAE/Gulf-specific commercial terms
-UAE_COMMERCIAL_TRIGGERS = {
+_DEFAULT_UAE_COMMERCIAL_TRIGGERS = {
     "fit out", "fitout", "turnkey", "mep", "hvac",
     "renovation", "construction", "contracting",
     "interior design", "landscaping",
     "license", "approval", "permit",
     "villa", "warehouse", "office",
 }
+
+# Backward compatibility aliases (deprecated - use get_*_triggers() functions)
+COMMERCIAL_TRIGGERS = _DEFAULT_COMMERCIAL_TRIGGERS
+TRANSACTIONAL_TRIGGERS = _DEFAULT_TRANSACTIONAL_TRIGGERS
+B2B_TRIGGERS = _DEFAULT_B2B_TRIGGERS
+UAE_COMMERCIAL_TRIGGERS = _DEFAULT_UAE_COMMERCIAL_TRIGGERS
 
 
 # =============================================================================
@@ -573,6 +649,8 @@ def commercial_value(
     High commercial value keywords are prioritized for lead generation
     over traffic-focused informational keywords.
     
+    Triggers are loaded from resources/triggers.yaml to allow niche customization.
+    
     Args:
         keyword: The keyword to evaluate
         intent: Pre-classified intent ('transactional', 'commercial', etc.)
@@ -588,6 +666,12 @@ def commercial_value(
     """
     kw_lower = keyword.lower()
     tokens = set(kw_lower.split())
+    
+    # Load triggers from YAML (cached)
+    commercial_triggers = get_commercial_triggers()
+    transactional_triggers = get_transactional_triggers()
+    b2b_triggers = get_b2b_triggers()
+    uae_triggers = get_uae_triggers()
     
     score = 0.0
     
@@ -605,22 +689,22 @@ def commercial_value(
     score += intent_scores.get(intent, 0.1)
     
     # Transactional trigger boost (highest value)
-    for trigger in TRANSACTIONAL_TRIGGERS:
+    for trigger in transactional_triggers:
         if trigger in kw_lower:
             score += 0.3
             break
     
     # Commercial trigger boost
-    commercial_matches = len(tokens & COMMERCIAL_TRIGGERS)
+    commercial_matches = len(tokens & commercial_triggers)
     score += min(0.2, commercial_matches * 0.1)
     
     # B2B/Enterprise trigger boost
-    b2b_matches = len(tokens & B2B_TRIGGERS)
+    b2b_matches = len(tokens & b2b_triggers)
     score += min(0.15, b2b_matches * 0.1)
     
     # UAE/Gulf-specific commercial triggers
     if geo.lower() in ("ae", "sa", "qa", "kw", "bh", "om"):
-        for trigger in UAE_COMMERCIAL_TRIGGERS:
+        for trigger in uae_triggers:
             if trigger in kw_lower:
                 score += 0.15
                 break
