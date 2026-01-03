@@ -97,6 +97,21 @@ DEFAULT_INTENT_RULES = {
 }
 
 
+from dataclasses import dataclass
+from typing import Tuple
+
+
+@dataclass
+class IntentResult:
+    """Result of intent classification with confidence score."""
+    intent: str
+    confidence: float  # 0.0 to 1.0
+    
+    def __iter__(self):
+        """Allow tuple unpacking: intent, confidence = infer_intent_with_confidence(...)"""
+        return iter((self.intent, self.confidence))
+
+
 def infer_intent(
     keyword: str, 
     competitors: List[str], 
@@ -113,23 +128,71 @@ def infer_intent(
     Returns:
         Intent string: informational, commercial, transactional, or navigational
     """
+    result = infer_intent_with_confidence(keyword, competitors, intent_rules)
+    return result.intent
+
+
+def infer_intent_with_confidence(
+    keyword: str, 
+    competitors: List[str], 
+    intent_rules: Optional[Dict[str, List[str]]] = None
+) -> IntentResult:
+    """
+    Infer search intent for a keyword with confidence score.
+    
+    Confidence scoring:
+    - 1.0: Exact match with intent trigger word
+    - 0.5: Partial/contextual match
+    - 0.1: Default/fallback classification
+    
+    Args:
+        keyword: The keyword to classify
+        competitors: List of competitor domains
+        intent_rules: Optional custom intent rules dict (from config)
+        
+    Returns:
+        IntentResult with intent string and confidence score
+    """
     rules = intent_rules or DEFAULT_INTENT_RULES
     k = keyword.lower()
     tokens = set(k.split())
+    
+    # Check for exact matches (high confidence)
     for intent, words in rules.items():
         for w in words:
             if " " in w:
+                # Multi-word phrase match
                 if w in k:
-                    return intent
+                    return IntentResult(intent=intent, confidence=1.0)
             else:
+                # Single word exact match
                 if w in tokens:
-                    return intent
-    # navigational if contains competitor brand tokens
+                    return IntentResult(intent=intent, confidence=1.0)
+    
+    # Check for partial/contextual matches (medium confidence)
+    # Commercial signals without exact match
+    commercial_signals = {"review", "vs", "versus", "alternative", "option", "recommend"}
+    if tokens & commercial_signals:
+        return IntentResult(intent="commercial", confidence=0.5)
+    
+    # Transactional signals without exact match  
+    transactional_signals = {"order", "purchase", "get", "find", "hire", "book"}
+    if tokens & transactional_signals:
+        return IntentResult(intent="transactional", confidence=0.5)
+    
+    # Informational signals without exact match
+    informational_signals = {"learn", "understand", "mean", "difference", "explain"}
+    if tokens & informational_signals:
+        return IntentResult(intent="informational", confidence=0.5)
+    
+    # Navigational: contains competitor brand tokens
     for c in competitors:
         token = c.split(".")[0].lower()
         if token and token in k:
-            return "navigational"
-    return "informational"
+            return IntentResult(intent="navigational", confidence=0.8)
+    
+    # Default fallback (low confidence - ambiguous intent)
+    return IntentResult(intent="informational", confidence=0.1)
 
 
 def vectorize_keywords(
