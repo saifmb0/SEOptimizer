@@ -290,10 +290,69 @@ def cluster_keywords(
     
     km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
     labels = km.fit_predict(X)
-    clusters = {}
+    
+    # Group keywords by cluster label
+    raw_clusters = {}
     for kw, lbl in zip(keywords, labels):
-        clusters.setdefault(f"cluster-{lbl}", []).append(kw)
+        raw_clusters.setdefault(lbl, []).append(kw)
+    
+    # Generate descriptive names for each cluster
+    clusters = {}
+    for lbl, kws in raw_clusters.items():
+        cluster_name = _generate_cluster_name(kws)
+        # Handle name collisions by appending label
+        if cluster_name in clusters:
+            cluster_name = f"{cluster_name}-{lbl}"
+        clusters[cluster_name] = kws
+    
     return clusters
+
+
+def _generate_cluster_name(keywords: List[str]) -> str:
+    """
+    Generate a descriptive name for a cluster based on most frequent n-grams.
+    
+    Finds the most common 1-gram or 2-gram among the cluster's keywords
+    and uses it as the cluster name.
+    
+    Args:
+        keywords: List of keywords in the cluster
+        
+    Returns:
+        Descriptive cluster name (e.g., "cluster-villa", "cluster-renovation")
+    """
+    from collections import Counter
+    
+    if not keywords:
+        return "cluster-misc"
+    
+    # Count all 1-grams and 2-grams
+    ngram_counts: Counter = Counter()
+    
+    for kw in keywords:
+        tokens = kw.lower().split()
+        
+        # Count 1-grams (single words)
+        for token in tokens:
+            # Skip very short tokens and common stopwords
+            if len(token) > 2 and token not in {"the", "and", "for", "with", "how", "what", "best", "top"}:
+                ngram_counts[token] += 1
+        
+        # Count 2-grams
+        for i in range(len(tokens) - 1):
+            bigram = f"{tokens[i]} {tokens[i+1]}"
+            ngram_counts[bigram] += 1
+    
+    if not ngram_counts:
+        return "cluster-misc"
+    
+    # Get the most common n-gram
+    most_common = ngram_counts.most_common(1)[0][0]
+    
+    # Clean up the name (replace spaces with hyphens)
+    cluster_name = f"cluster-{most_common.replace(' ', '-')}"
+    
+    return cluster_name
 
 
 def pick_pillar_per_cluster(clusters: Dict[str, List[str]], freq: Dict[str, int]) -> Dict[str, str]:
