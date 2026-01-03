@@ -347,8 +347,19 @@ def run_pipeline(
                 break
         for kw in selected:
             m = metrics.get(kw, {})
-            # Get parent topic (fallback to first word if not assigned)
-            pt = parent_topics.get(kw, parent_topics.get(kw.lower(), kw.split()[0] if kw else "general"))
+            
+            # Get parent topic with robust fallback chain:
+            # 1. LLM-assigned parent topic
+            # 2. Cluster name (descriptive, from cluster naming)
+            # 3. First meaningful word from keyword
+            # 4. Seed topic as last resort
+            pt = parent_topics.get(kw) or parent_topics.get(kw.lower())
+            if not pt or pt.lower() in ("general", "other", "misc", ""):
+                # Use cluster name as fallback (strip "cluster-" prefix if present)
+                cluster_fallback = cname.lower()
+                if cluster_fallback.startswith("cluster-"):
+                    cluster_fallback = cluster_fallback[8:]  # Remove "cluster-" prefix
+                pt = cluster_fallback if cluster_fallback else (kw.split()[0] if kw else seed_topic)
             
             # Get SERP features if available
             serp_features = m.get("serp_features", [])
